@@ -1,0 +1,32 @@
+# 林立后端本地开发环境
+# 启动：docker compose up -d
+# 停止：docker compose down
+# 清数据重建：docker compose down -v && docker compose up -d
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: linli-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: linli_dev_pwd
+      POSTGRES_DB: linli
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d linli"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # 2GB 服务器关键：限制 PG 内存
+    deploy:
+      resources:
+        limits:
+          memory: 700M
+
+volumes:
+  pgdata:
