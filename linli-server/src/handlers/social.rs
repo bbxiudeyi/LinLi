@@ -80,9 +80,12 @@ pub async fn feed(
     let limit = q.limit.unwrap_or(30).clamp(1, 100);
 
     let rows: Vec<ActivityListItem> = sqlx::query_as(
-        r#"SELECT a.id, a.user_id, a.type, a.distance_m, a.duration_s,
-                  a.moving_time_s, a.avg_pace_s_per_km, a.avg_speed_kmh,
-                  a.max_speed_kmh, a.elevation_gain_m, a.elevation_loss_m,
+        r#"SELECT a.id, a.user_id, a.type AS "type", a.distance_m, a.duration_s,
+                  a.moving_time_s, a.avg_pace_s_per_km,
+                  a.avg_speed_kmh::float8 AS avg_speed_kmh,
+                  a.max_speed_kmh::float8 AS max_speed_kmh,
+                  a.elevation_gain_m::float8 AS elevation_gain_m,
+                  a.elevation_loss_m::float8 AS elevation_loss_m,
                   a.calories, a.start_time, a.end_time, a.title,
                   a.description, a.is_private,
                   u.nickname,

@@ -11,42 +11,30 @@ class LoginPage extends ConsumerStatefulWidget {
 }
 
 class _LoginPageState extends ConsumerState<LoginPage> {
-  final _phoneController = TextEditingController();
-  final _codeController = TextEditingController();
-  bool _codeSent = false;
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _loading = false;
 
   @override
   void dispose() {
-    _phoneController.dispose();
-    _codeController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
-  Future<void> _sendCode() async {
-    if (_phoneController.text.length != 11) {
+  Future<void> _login() async {
+    if (_emailController.text.trim().isEmpty ||
+        _passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入正确的手机号')),
+        const SnackBar(content: Text('请输入邮箱和密码')),
       );
       return;
     }
 
     setState(() => _loading = true);
-    await ref.read(authProvider.notifier).signInWithPhone(
-          '+86${_phoneController.text}',
-        );
-    setState(() {
-      _loading = false;
-      _codeSent = true;
-    });
-  }
-
-  Future<void> _verify() async {
-    setState(() => _loading = true);
-    final phone = '+86${_phoneController.text}';
-    await ref.read(authProvider.notifier).verifyOtp(
-          phone,
-          _codeController.text,
+    await ref.read(authProvider.notifier).login(
+          _emailController.text.trim(),
+          _passwordController.text,
         );
     setState(() => _loading = false);
 
@@ -54,9 +42,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     final auth = ref.read(authProvider);
     if (auth.status == AuthStatus.authenticated) {
       context.go('/feed');
-    } else if (auth.error == '__new_user__') {
-      // 新用户 → 跳注册页，把手机号带过去
-      context.go('/register', extra: phone);
     } else if (auth.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(auth.error!)),
@@ -92,34 +77,27 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               ),
               const SizedBox(height: 48),
               TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                maxLength: 11,
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
-                  labelText: '手机号',
-                  hintText: '请输入手机号',
-                  prefixText: '+86 ',
+                  labelText: '邮箱',
+                  hintText: 'you@example.com',
                   border: OutlineInputBorder(),
                 ),
               ),
-              if (_codeSent) ...[
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _codeController,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  decoration: const InputDecoration(
-                    labelText: '验证码',
-                    hintText: '请输入验证码',
-                    border: OutlineInputBorder(),
-                  ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: '密码',
+                  hintText: '至少 8 位',
+                  border: OutlineInputBorder(),
                 ),
-              ],
+              ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _loading
-                    ? null
-                    : (_codeSent ? _verify : _sendCode),
+                onPressed: _loading ? null : _login,
                 child: _loading
                     ? const SizedBox(
                         height: 20,
@@ -127,7 +105,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white),
                       )
-                    : Text(_codeSent ? '登录' : '获取验证码'),
+                    : const Text('登录'),
               ),
               const SizedBox(height: 16),
               TextButton(

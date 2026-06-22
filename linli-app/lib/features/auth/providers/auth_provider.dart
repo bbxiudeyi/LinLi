@@ -1,12 +1,50 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/database/local_db.dart';
-import '../../../core/database/local_user.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/network/api_client.dart';
 
 enum AuthStatus { unknown, authenticated, unauthenticated }
 
+/// 用户信息（来自后端 /auth/me 或 register/login 的返回）。
+class RemoteUser {
+  final String id;
+  final String email;
+  final String nickname;
+  final String? avatarUrl;
+  final String? bio;
+  final String? gender;
+  final String? birthday;
+  final double? weightKg;
+  final String createdAt;
+
+  const RemoteUser({
+    required this.id,
+    required this.email,
+    required this.nickname,
+    this.avatarUrl,
+    this.bio,
+    this.gender,
+    this.birthday,
+    this.weightKg,
+    required this.createdAt,
+  });
+
+  factory RemoteUser.fromJson(Map<String, dynamic> j) => RemoteUser(
+        id: j['id'] as String,
+        email: j['email'] as String,
+        nickname: j['nickname'] as String,
+        avatarUrl: j['avatar_url'] as String?,
+        bio: j['bio'] as String?,
+        gender: j['gender'] as String?,
+        birthday: j['birthday'] as String?,
+        weightKg: (j['weight_kg'] as num?)?.toDouble(),
+        createdAt: j['created_at'] as String,
+      );
+}
+
 class AuthState {
   final AuthStatus status;
-  final LocalUser? user;
+  final RemoteUser? user;
   final String? error;
 
   const AuthState({
@@ -15,7 +53,7 @@ class AuthState {
     this.error,
   });
 
-  AuthState copyWith({AuthStatus? status, LocalUser? user, String? error}) {
+  AuthState copyWith({AuthStatus? status, RemoteUser? user, String? error}) {
     return AuthState(
       status: status ?? this.status,
       user: user ?? this.user,
@@ -24,61 +62,76 @@ class AuthState {
   }
 }
 
-/// 本地认证：手机号 + 假验证码（任意 6 位数字都通过）。
-///
-/// 替代 Supabase Auth 的 OTP 登录。单用户本地模式，无需云服务。
+/// 云端认证：邮箱 + 密码。
+/// 调用 Rust 后端 /api/v1/auth/* 接口。
 class AuthNotifier extends StateNotifier<AuthState> {
   AuthNotifier() : super(const AuthState()) {
     _init();
   }
 
-  void _init() {
-    // 本地模式：默认未登录（登录状态不持久化，每次启动需重新登录）
-    state = state.copyWith(status: AuthStatus.unauthenticated);
-  }
-
-  /// 发送验证码（本地模式：假装发送成功）。
-  Future<void> signInWithPhone(String phone) async {
-    state = state.copyWith(error: null);
-    // 本地模式不做任何实际请求，直接成功（UI 会进入验证码输入步骤）
-  }
-
-  /// 验证验证码：任意 6 位数字都通过。
-  /// 查本地 users 表：有该 phone → 登录；无 → 报错让 UI 跳注册。
-  Future<void> verifyOtp(String phone, String code) async {
-    if (code.length != 6) {
-      state = state.copyWith(error: '请输入 6 位验证码');
+  Future<void> _init() async {
+    // 启动时检查是否有持久化 token，有的话调 /auth/me 恢复登录态
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('linli_jwt_token');
+    if (token == null || token.isEmpty) {
+      state = state.copyWith(status: AuthStatus.unauthenticated);
       return;
     }
+
     try {
-      final user = await LocalDb.findUserByPhone(phone);
-      if (user != null) {
-        state = AuthState(status: AuthStatus.authenticated, user: user);
-      } else {
-        // 新用户：登录流程仍标记成功，由 UI 判断是否跳注册页
-        // 这里给一个临时未注册标记，供 login_page 决定跳转
-        state = state.copyWith(
-          status: AuthStatus.unauthenticated,
-          error: '__new_user__',
-        );
-      }
+      final res = await ApiClient.instance.dio.get('/auth/me');
+      final user = RemoteUser.fromJson(res.data as Map<String, dynamic>);
+      state = AuthState(status: AuthStatus.authenticated, user: user);
+    } catch (_) {
+      // token 失效，清除
+      await ApiClient.instance.clearToken();
+      state = state.copyWith(status: AuthStatus.unauthenticated);
+    }
+  }
+
+  /// 登录（邮箱 + 密码）。
+  Future<void> login(String email, String password) async {
+    state = state.copyWith(error: null);
+    try {
+      final res = await ApiClient.instance.dio.post(
+        '/auth/login',
+        data: {'email': email, 'password': password},
+      );
+      final token = res.data['token'] as String;
+      final user = RemoteUser.fromJson(res.data['user'] as Map<String, dynamic>);
+      await ApiClient.instance.saveToken(token);
+      state = AuthState(status: AuthStatus.authenticated, user: user);
+    } on DioException catch (e) {
+      final msg = e.response?.data?['error'] as String? ?? '登录失败';
+      state = state.copyWith(error: msg);
     } catch (e) {
       state = state.copyWith(error: '登录失败：$e');
     }
   }
 
-  /// 注册新用户（本地创建）。
-  Future<void> register(String phone, String nickname) async {
+  /// 注册（邮箱 + 密码 + 昵称）。
+  Future<void> register(String email, String password, String nickname) async {
+    state = state.copyWith(error: null);
     try {
-      final user = await LocalDb.createUser(phone: phone, nickname: nickname);
+      final res = await ApiClient.instance.dio.post(
+        '/auth/register',
+        data: {'email': email, 'password': password, 'nickname': nickname},
+      );
+      final token = res.data['token'] as String;
+      final user = RemoteUser.fromJson(res.data['user'] as Map<String, dynamic>);
+      await ApiClient.instance.saveToken(token);
       state = AuthState(status: AuthStatus.authenticated, user: user);
+    } on DioException catch (e) {
+      final msg = e.response?.data?['error'] as String? ?? '注册失败';
+      state = state.copyWith(error: msg);
     } catch (e) {
       state = state.copyWith(error: '注册失败：$e');
     }
   }
 
-  /// 退出登录（清内存状态，不删数据）。
+  /// 退出登录（清 token，清状态）。
   Future<void> signOut() async {
+    await ApiClient.instance.clearToken();
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 }

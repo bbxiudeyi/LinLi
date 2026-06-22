@@ -76,8 +76,10 @@ async fn main() -> anyhow::Result<()> {
         )
         // Feed
         .route("/api/v1/feed", get(handlers::social::feed))
-        .layer(axum::Extension(state.clone()))
+        // 层的顺序（从外到内执行）：trace → cors → middleware → extension → routes
+        // extension 必须在中间件"之前"（更内层），中间件才能在 extensions 里读到
         .layer(axum::middleware::from_fn(auth::auth_middleware))
+        .layer(axum::Extension(state.clone()))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

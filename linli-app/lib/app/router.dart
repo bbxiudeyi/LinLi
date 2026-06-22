@@ -17,7 +17,7 @@ final router = GoRouter(
     ),
     GoRoute(
       path: '/register',
-      builder: (context, state) => RegisterPage(phone: state.extra as String?),
+      builder: (context, state) => const RegisterPage(),
     ),
     ShellRoute(
       builder: (context, state, child) {

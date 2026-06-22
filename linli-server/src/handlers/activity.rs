@@ -29,11 +29,16 @@ pub async fn list_my_activities(
             .map_err(|e| AppError::BadRequest(format!("cursor 格式错误: {e}")))?
             .with_timezone(&chrono::Utc);
         sqlx::query_as(
-            r#"SELECT a.id, a.user_id, a.type, a.distance_m, a.duration_s,
-                      a.moving_time_s, a.avg_pace_s_per_km, a.avg_speed_kmh,
-                      a.max_speed_kmh, a.elevation_gain_m, a.elevation_loss_m,
+            r#"SELECT a.id, a.user_id, a.type AS "type", a.distance_m, a.duration_s,
+                      a.moving_time_s, a.avg_pace_s_per_km,
+                      a.avg_speed_kmh::float8 AS avg_speed_kmh,
+                      a.max_speed_kmh::float8 AS max_speed_kmh,
+                      a.elevation_gain_m::float8 AS elevation_gain_m,
+                      a.elevation_loss_m::float8 AS elevation_loss_m,
                       a.calories, a.start_time, a.end_time, a.title,
-                      a.description, a.is_private
+                      a.description, a.is_private,
+                      NULL::text AS nickname, NULL::text AS avatar_url,
+                      NULL::bigint AS kudo_count, NULL::bool AS has_kudo
                FROM activities a
                WHERE a.user_id = $1 AND a.start_time < $2
                ORDER BY a.start_time DESC LIMIT $3"#,
@@ -45,11 +50,16 @@ pub async fn list_my_activities(
         .await?
     } else {
         sqlx::query_as(
-            r#"SELECT a.id, a.user_id, a.type, a.distance_m, a.duration_s,
-                      a.moving_time_s, a.avg_pace_s_per_km, a.avg_speed_kmh,
-                      a.max_speed_kmh, a.elevation_gain_m, a.elevation_loss_m,
+            r#"SELECT a.id, a.user_id, a.type AS "type", a.distance_m, a.duration_s,
+                      a.moving_time_s, a.avg_pace_s_per_km,
+                      a.avg_speed_kmh::float8 AS avg_speed_kmh,
+                      a.max_speed_kmh::float8 AS max_speed_kmh,
+                      a.elevation_gain_m::float8 AS elevation_gain_m,
+                      a.elevation_loss_m::float8 AS elevation_loss_m,
                       a.calories, a.start_time, a.end_time, a.title,
-                      a.description, a.is_private
+                      a.description, a.is_private,
+                      NULL::text AS nickname, NULL::text AS avatar_url,
+                      NULL::bigint AS kudo_count, NULL::bool AS has_kudo
                FROM activities a
                WHERE a.user_id = $1
                ORDER BY a.start_time DESC LIMIT $2"#,
@@ -135,9 +145,12 @@ pub async fn get_activity(
 ) -> AppResult<Json<ActivityDetail>> {
     // 1. 查活动基础信息（用 ActivityListItem 直接 FromRow）
     let item: Option<ActivityListItem> = sqlx::query_as(
-        r#"SELECT a.id, a.user_id, a.type, a.distance_m, a.duration_s,
-                  a.moving_time_s, a.avg_pace_s_per_km, a.avg_speed_kmh,
-                  a.max_speed_kmh, a.elevation_gain_m, a.elevation_loss_m,
+        r#"SELECT a.id, a.user_id, a.type AS "type", a.distance_m, a.duration_s,
+                  a.moving_time_s, a.avg_pace_s_per_km,
+                  a.avg_speed_kmh::float8 AS avg_speed_kmh,
+                  a.max_speed_kmh::float8 AS max_speed_kmh,
+                  a.elevation_gain_m::float8 AS elevation_gain_m,
+                  a.elevation_loss_m::float8 AS elevation_loss_m,
                   a.calories, a.start_time, a.end_time, a.title,
                   a.description, a.is_private,
                   NULL::text AS nickname, NULL::text AS avatar_url,

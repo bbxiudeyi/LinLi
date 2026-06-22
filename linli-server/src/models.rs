@@ -136,6 +136,7 @@ pub struct ActivityListItem {
     pub id: Uuid,
     pub user_id: Uuid,
     #[serde(rename = "type")]
+    #[sqlx(rename = "type")]
     pub sport_type: String,
     pub distance_m: i32,
     pub duration_s: i32,
