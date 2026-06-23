@@ -123,17 +123,27 @@ pub async fn auth_middleware(
 
         if let Some(token) = auth_header {
             if let Ok(claims) = verify_jwt(token, &state.config.jwt_secret) {
-                // ★ 校验 token_version：查 DB 当前版本，不匹配则视为已撤销
-                let db_ver: Option<(i32,)> = sqlx::query_as(
-                    "SELECT token_version FROM users WHERE id = $1",
-                )
-                .bind(claims.sub)
-                .fetch_optional(&state.db)
-                .await
-                .ok()
-                .flatten();
+                // ★ 校验 token_version：先查进程内缓存，miss 再查 DB 并回填。
+                //   token_version 仅在登出/改密码时变更，绝大部分请求命中缓存。
+                let db_ver: Option<i32> = match crate::token_version_cache::get(claims.sub).await {
+                    Some(v) => Some(v),
+                    None => {
+                        let fetched: Option<(i32,)> = sqlx::query_as(
+                            "SELECT token_version FROM users WHERE id = $1",
+                        )
+                        .bind(claims.sub)
+                        .fetch_optional(&state.db)
+                        .await
+                        .ok()
+                        .flatten();
+                        if let Some((v,)) = fetched {
+                            crate::token_version_cache::put(claims.sub, v).await;
+                        }
+                        fetched.map(|(v,)| v)
+                    }
+                };
 
-                if let Some((db_ver,)) = db_ver {
+                if let Some(db_ver) = db_ver {
                     if claims.ver == db_ver as i64 {
                         // 版本匹配，放行
                         req.extensions_mut().insert(claims);

@@ -92,6 +92,8 @@ pub async fn logout(
         .bind(user_id)
         .execute(&state.db)
         .await?;
+    // 失效本进程的 token_version 缓存，让旧 token 立即被拒（不等到 TTL 过期）
+    crate::token_version_cache::invalidate(user_id).await;
     Ok(Json(serde_json::json!({ "logged_out": true })))
 }
 

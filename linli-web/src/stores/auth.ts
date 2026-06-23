@@ -33,7 +33,14 @@ export const useAuthStore = defineStore('auth', () => {
     setAuth(res.token, res.user)
   }
 
-  function logout() {
+  /// 退出登录：先通知后端撤销 token（让其他设备也掉线），再清本地态。
+  /// 网络失败不阻塞本地登出（用户已决定离开）。
+  async function logout() {
+    try {
+      await authApi.logout()
+    } catch {
+      // 后端不可达也要让用户在本机登出
+    }
     token.value = null
     user.value = null
     localStorage.removeItem('linli_token')

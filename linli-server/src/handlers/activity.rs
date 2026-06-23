@@ -16,7 +16,7 @@ pub struct ListQuery {
 
 /// GET /api/v1/activities
 ///
-/// 我的活动的列表（不含轨迹坐标）。
+/// 我的活动的列表（不含轨迹坐标）。游标分页：传 cursor 则取该时间之前。
 pub async fn list_my_activities(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -24,51 +24,39 @@ pub async fn list_my_activities(
 ) -> AppResult<Json<Vec<ActivityListItem>>> {
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
 
-    let rows: Vec<ActivityListItem> = if let Some(cursor) = q.cursor {
-        let cursor_ts = chrono::DateTime::parse_from_rfc3339(&cursor)
-            .map_err(|e| AppError::BadRequest(format!("cursor 格式错误: {e}")))?
-            .with_timezone(&chrono::Utc);
-        sqlx::query_as(
-            r#"SELECT a.id, a.user_id, a.type AS "type", a.distance_m, a.duration_s,
-                      a.moving_time_s, a.avg_pace_s_per_km,
-                      a.avg_speed_kmh::float8 AS avg_speed_kmh,
-                      a.max_speed_kmh::float8 AS max_speed_kmh,
-                      a.elevation_gain_m::float8 AS elevation_gain_m,
-                      a.elevation_loss_m::float8 AS elevation_loss_m,
-                      a.calories, a.start_time, a.end_time, a.title,
-                      a.description, a.is_private,
-                      NULL::text AS nickname, NULL::text AS avatar_url,
-                      NULL::bigint AS kudo_count, NULL::bool AS has_kudo
-               FROM activities a
-               WHERE a.user_id = $1 AND a.start_time < $2
-               ORDER BY a.start_time DESC LIMIT $3"#,
-        )
-        .bind(user_id)
-        .bind(cursor_ts)
-        .bind(limit)
-        .fetch_all(&state.db)
-        .await?
-    } else {
-        sqlx::query_as(
-            r#"SELECT a.id, a.user_id, a.type AS "type", a.distance_m, a.duration_s,
-                      a.moving_time_s, a.avg_pace_s_per_km,
-                      a.avg_speed_kmh::float8 AS avg_speed_kmh,
-                      a.max_speed_kmh::float8 AS max_speed_kmh,
-                      a.elevation_gain_m::float8 AS elevation_gain_m,
-                      a.elevation_loss_m::float8 AS elevation_loss_m,
-                      a.calories, a.start_time, a.end_time, a.title,
-                      a.description, a.is_private,
-                      NULL::text AS nickname, NULL::text AS avatar_url,
-                      NULL::bigint AS kudo_count, NULL::bool AS has_kudo
-               FROM activities a
-               WHERE a.user_id = $1
-               ORDER BY a.start_time DESC LIMIT $2"#,
-        )
-        .bind(user_id)
-        .bind(limit)
-        .fetch_all(&state.db)
-        .await?
+    // cursor 解析：None 表示首页。统一成单个 SQL，用 `($2 IS NULL OR ...)` 兼顾两种情况。
+    let cursor_ts: Option<chrono::DateTime<chrono::Utc>> = match q.cursor.as_deref() {
+        None => None,
+        Some(c) => Some(
+            chrono::DateTime::parse_from_rfc3339(c)
+                .map_err(|e| AppError::BadRequest(format!("cursor 格式错误: {e}")))?
+                .with_timezone(&chrono::Utc),
+        ),
     };
+
+    // 列表项里 join 用户字段、点赞统计在本接口用不到，直接填 NULL（FromRow 要求字段齐全）。
+    let rows: Vec<ActivityListItem> = sqlx::query_as(
+        r#"SELECT a.id, a.user_id, a.type AS "type", a.distance_m, a.duration_s,
+                  a.moving_time_s, a.avg_pace_s_per_km,
+                  a.avg_speed_kmh::float8 AS avg_speed_kmh,
+                  a.max_speed_kmh::float8 AS max_speed_kmh,
+                  a.elevation_gain_m::float8 AS elevation_gain_m,
+                  a.elevation_loss_m::float8 AS elevation_loss_m,
+                  a.calories, a.start_time, a.end_time, a.title,
+                  a.description, a.is_private,
+                  NULL::text AS nickname, NULL::text AS avatar_url,
+                  NULL::bigint AS kudo_count, NULL::bool AS has_kudo
+           FROM activities a
+           WHERE a.user_id = $1
+             AND ($2::timestamptz IS NULL OR a.start_time < $2)
+           ORDER BY a.start_time DESC
+           LIMIT $3"#,
+    )
+    .bind(user_id)
+    .bind(cursor_ts)
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await?;
 
     Ok(Json(rows))
 }

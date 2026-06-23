@@ -4,6 +4,7 @@ mod db;
 mod error;
 mod handlers;
 mod models;
+mod token_version_cache;
 
 use axum::http::{header, Method};
 use axum::routing::{delete, get, patch, post};

@@ -52,7 +52,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     if (!mounted) return;
     final auth = ref.read(authProvider);
     if (auth.status == AuthStatus.authenticated) {
-      context.go('/feed');
+      final redirect = GoRouterState.of(context).uri.queryParameters['redirect'];
+      context.go((redirect != null && redirect.isNotEmpty) ? redirect : '/feed');
     } else if (auth.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(auth.error!)),

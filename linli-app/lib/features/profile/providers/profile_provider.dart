@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -53,19 +55,32 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
             (activitiesRes.data as List).cast<Map<String, dynamic>>(),
         loading: false,
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('加载个人资料失败: $e');
       state = state.copyWith(loading: false);
     }
   }
 
   /// 更新资料到云端，成功后刷新本地 state。
+  /// 若服务端返回新 token（改密码时会重签），同步更新本地 token。
   Future<bool> updateProfile(Map<String, dynamic> fields) async {
     try {
       final res = await ApiClient.instance.dio.patch('/users/me', data: fields);
-      // 用服务器返回的完整 profile 覆盖本地
-      state = state.copyWith(profile: res.data as Map<String, dynamic>);
+      final data = res.data as Map<String, dynamic>;
+      // 改密码时后端会返回重签的 token，替换本地旧 token
+      final newToken = data['token'] as String?;
+      if (newToken != null && newToken.isNotEmpty) {
+        await ApiClient.instance.saveToken(newToken);
+      }
+      // 用服务器返回的完整 profile 覆盖本地（token 字段已剥离，不入 state）
+      final profile = Map<String, dynamic>.from(data)..remove('token');
+      state = state.copyWith(profile: profile);
       return true;
-    } catch (_) {
+    } on DioException catch (e) {
+      debugPrint('更新资料失败: ${e.response?.data}');
+      return false;
+    } catch (e) {
+      debugPrint('更新资料异常: $e');
       return false;
     }
   }

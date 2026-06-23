@@ -1,7 +1,7 @@
 /// Mapbox 配置集中管理。
 ///
 /// Public Token 通过 `--dart-define=MAPBOX_PUBLIC_TOKEN=pk.xxx` 传入，
-/// 与项目里 Supabase 的做法保持一致，避免硬编码进源码。
+/// 避免硬编码进源码。
 class MapboxConfig {
   MapboxConfig._();
 

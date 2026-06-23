@@ -41,7 +41,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (!mounted) return;
     final auth = ref.read(authProvider);
     if (auth.status == AuthStatus.authenticated) {
-      context.go('/feed');
+      // 优先跳回被守卫拦截前想去的页面，没有就回首页
+      final redirect = GoRouterState.of(context).uri.queryParameters['redirect'];
+      context.go((redirect != null && redirect.isNotEmpty) ? redirect : '/feed');
     } else if (auth.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(auth.error!)),

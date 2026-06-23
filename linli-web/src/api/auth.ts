@@ -40,3 +40,8 @@ export async function getMe(): Promise<UserProfile> {
   const { data } = await client.get<UserProfile>('/auth/me')
   return data
 }
+
+/// 撤销当前 token（后端 token_version + 1，使所有旧 token 失效）。
+export async function logout(): Promise<void> {
+  await client.post('/auth/logout')
+}

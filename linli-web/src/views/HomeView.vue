@@ -6,6 +6,7 @@ const auth = useAuthStore()
 const router = useRouter()
 
 function logout() {
+  // 不 await：UI 立即跳转，撤销在后台进行
   auth.logout()
   router.push('/login')
 }

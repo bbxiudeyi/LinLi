@@ -6,7 +6,7 @@ import '../providers/profile_provider.dart';
 /// 编辑个人资料页。
 ///
 /// 支持修改：昵称、简介、性别、生日、体重(kg)。
-/// 头像目前用占位（后续可接入 image_picker + Supabase Storage）。
+/// 头像目前用占位（后续可接入 image_picker + 对象存储）。
 /// 字段对应数据库 users 表。
 class EditProfilePage extends ConsumerStatefulWidget {
   const EditProfilePage({super.key});

@@ -48,7 +48,8 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
       final res = await ApiClient.instance.dio.get('/activities');
       final list = (res.data as List).cast<Map<String, dynamic>>();
       state = ActivityListState(activities: list, loading: false);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('加载活动列表失败: $e');
       state = state.copyWith(loading: false);
     }
   }
@@ -126,7 +127,8 @@ class ActivityDetailNotifier
 
       state = ActivityDetailState(
           activity: activityMap, points: points, loading: false);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('加载活动详情失败: $e');
       state = const ActivityDetailState(loading: false);
     }
   }

@@ -45,12 +45,13 @@ class FeedPage extends ConsumerWidget {
         itemCount: feed.activities.length,
         itemBuilder: (context, index) {
           final activity = feed.activities[index];
+          final id = activity['id'] as String?;
+          final hasKudo = feed.kudoMap[id] ?? false;
           return _ActivityCard(
             activity: activity,
-            onKudo: () => ref
-                .read(feedProvider.notifier)
-                .toggleKudo(activity['id']),
-            onTap: () => context.push('/activity/${activity['id']}'),
+            hasKudo: hasKudo,
+            onKudo: id == null ? null : () => ref.read(feedProvider.notifier).toggleKudo(id),
+            onTap: id == null ? null : () => context.push('/activity/$id'),
           );
         },
       ),
@@ -60,11 +61,13 @@ class FeedPage extends ConsumerWidget {
 
 class _ActivityCard extends StatelessWidget {
   final Map<String, dynamic> activity;
-  final VoidCallback onKudo;
-  final VoidCallback onTap;
+  final bool hasKudo;
+  final VoidCallback? onKudo;
+  final VoidCallback? onTap;
 
   const _ActivityCard({
     required this.activity,
+    required this.hasKudo,
     required this.onKudo,
     required this.onTap,
   });
@@ -93,6 +96,12 @@ class _ActivityCard extends StatelessWidget {
         distance >= 1000 ? '${(distance / 1000).toStringAsFixed(2)} km' : '$distance m';
     final durationStr = _formatDuration(duration);
 
+    // 后端返回扁平的 nickname / avatar_url（无嵌套 users 对象）
+    final nickname = (activity['nickname'] as String?) ?? '未知用户';
+    // 点赞数：后端返回 kudo_count，本地根据已赞状态即时增减
+    final baseKudos = (activity['kudo_count'] as num?)?.toInt() ?? 0;
+    final kudoCount = baseKudos + (hasKudo ? 1 : 0);
+
     return Card(
       child: InkWell(
         onTap: onTap,
@@ -102,18 +111,25 @@ class _ActivityCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // User row
+              // User row（扁平 nickname / avatar_url）
               Row(
                 children: [
-                  const CircleAvatar(
-                      radius: 18, child: Icon(Icons.person, size: 20)),
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundImage: (activity['avatar_url'] as String?) != null
+                        ? NetworkImage(activity['avatar_url'] as String)
+                        : null,
+                    child: (activity['avatar_url'] as String?) == null
+                        ? const Icon(Icons.person, size: 20)
+                        : null,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          activity['users']?['nickname'] ?? '未知用户',
+                          nickname,
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         Text(
@@ -128,24 +144,12 @@ class _ActivityCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
 
-              // Map preview
-              if (activity['map_image_url'] != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    height: 160,
-                    color: Colors.grey[300],
-                    child: const Center(child: Text('轨迹地图')),
-                  ),
-                ),
-
               // Description
               if (activity['description'] != null) ...[
-                const SizedBox(height: 8),
                 Text(activity['description'],
                     maxLines: 2, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 8),
               ],
-              const SizedBox(height: 8),
 
               // Stats
               Row(
@@ -161,22 +165,21 @@ class _ActivityCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
 
-              // Actions
+              // Actions：仅点赞（评论功能未实现，暂不展示）
               Row(
                 children: [
                   IconButton(
                     onPressed: onKudo,
-                    icon: const Icon(Icons.thumb_up_outlined, size: 20),
+                    icon: Icon(
+                      hasKudo ? Icons.thumb_up : Icons.thumb_up_outlined,
+                      size: 20,
+                      color: hasKudo ? const Color(0xFFFF6B35) : null,
+                    ),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
                   const SizedBox(width: 4),
-                  Text('${activity['kudo_count'] ?? 0}',
-                      style: const TextStyle(fontSize: 12)),
-                  const SizedBox(width: 16),
-                  const Icon(Icons.comment_outlined, size: 20),
-                  const SizedBox(width: 4),
-                  Text('${activity['comment_count'] ?? 0}',
+                  Text('$kudoCount',
                       style: const TextStyle(fontSize: 12)),
                 ],
               ),

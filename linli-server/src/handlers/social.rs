@@ -1,6 +1,8 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{ActivityListItem, UpdateUserRequest, UserProfile};
+use crate::models::{
+    ActivityListItem, PublicUserProfile, UpdateProfileResponse, UpdateUserRequest,
+};
 use crate::AppState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -10,13 +12,15 @@ use uuid::Uuid;
 // ==================== 用户资料 ====================
 
 /// GET /api/v1/users/:id
+///
+/// 返回其他用户的**公开资料**（不含 email、体重等隐私字段）。
 pub async fn get_user_profile(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> AppResult<Json<UserProfile>> {
-    let user: Option<UserProfile> = sqlx::query_as(
-        r#"SELECT id, email, nickname, avatar_url, bio, gender, birthday,
-                  weight_kg, created_at FROM users WHERE id = $1"#,
+) -> AppResult<Json<PublicUserProfile>> {
+    let user: Option<PublicUserProfile> = sqlx::query_as(
+        r#"SELECT id, nickname, avatar_url, bio, created_at
+           FROM users WHERE id = $1"#,
     )
     .bind(id)
     .fetch_optional(&state.db)
@@ -26,12 +30,13 @@ pub async fn get_user_profile(
 
 /// PATCH /api/v1/users/me
 ///
-/// 更新资料（任意字段可选）。
+/// 更新资料（任意字段可选）。若改了密码：token_version+1（其他设备掉线），
+/// 并用新版本重签 token 返回，客户端应替换本地 token。
 pub async fn update_my_profile(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Json(req): Json<UpdateUserRequest>,
-) -> AppResult<Json<UserProfile>> {
+) -> AppResult<Json<UpdateProfileResponse>> {
     // 校验 gender
     if let Some(ref g) = req.gender {
         if g != "male" && g != "female" {
@@ -50,7 +55,7 @@ pub async fn update_my_profile(
         (None, false)
     };
 
-    let user: UserProfile = sqlx::query_as(
+    let user: crate::models::UserProfile = sqlx::query_as(
         r#"UPDATE users SET
              nickname = COALESCE($1, nickname),
              bio = $2,
@@ -76,13 +81,35 @@ pub async fn update_my_profile(
     .fetch_one(&state.db)
     .await?;
 
+    // 改密码：失效缓存，并读回新 token_version 重签 token，让本设备继续可用
+    let new_token = if bump_version {
+        crate::token_version_cache::invalidate(user_id).await;
+        let (new_ver,): (i32,) =
+            sqlx::query_as("SELECT token_version FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&state.db)
+                .await?;
+        crate::token_version_cache::put(user_id, new_ver).await;
+        Some(crate::auth::sign_jwt(
+            user_id,
+            new_ver,
+            &state.config.jwt_secret,
+            state.config.jwt_expires_hours,
+        )?)
+    } else {
+        None
+    };
+
     let msg = if bump_version {
         "资料已更新，密码已修改，其他设备需重新登录"
     } else {
         "资料已更新"
     };
     tracing::info!("用户 {user_id} 更新资料: {msg}");
-    Ok(Json(user))
+    Ok(Json(UpdateProfileResponse {
+        user,
+        token: new_token,
+    }))
 }
 
 // ==================== Feed（关注流）====================
@@ -114,10 +141,16 @@ pub async fn feed(
                   a.description, a.is_private,
                   u.nickname,
                   u.avatar_url,
-                  (SELECT COUNT(*) FROM kudos k WHERE k.activity_id = a.id) AS kudo_count,
-                  EXISTS(SELECT 1 FROM kudos k WHERE k.activity_id = a.id AND k.user_id = $1) AS has_kudo
+                  -- 聚合一次，避免每行相关子查询（N+1）
+                  COALESCE(kc.cnt, 0)::bigint AS kudo_count,
+                  EXISTS(SELECT 1 FROM kudos k
+                         WHERE k.activity_id = a.id AND k.user_id = $1) AS has_kudo
            FROM activities a
            JOIN users u ON u.id = a.user_id
+           LEFT JOIN (
+               SELECT activity_id, COUNT(*) AS cnt
+               FROM kudos GROUP BY activity_id
+           ) kc ON kc.activity_id = a.id
            WHERE (a.user_id = $1
                   OR a.user_id IN (SELECT following_id FROM follows WHERE follower_id = $1))
              AND a.is_private = FALSE

@@ -57,6 +57,16 @@ pub struct UpdateUserRequest {
     pub password: Option<String>, // 改密码时传入，会同时 token_version+1 让其他设备掉线
 }
 
+/// PATCH /users/me 的响应。
+/// 仅当改了密码（token_version 被递增）时，`token` 为重签的新 token，
+/// 客户端应替换本地存储的旧 token；否则 `token` 为 None。
+#[derive(Debug, Serialize)]
+pub struct UpdateProfileResponse {
+    #[serde(flatten)]
+    pub user: UserProfile,
+    pub token: Option<String>,
+}
+
 /// 用户公开信息（不含密码）。
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct UserProfile {
@@ -68,6 +78,17 @@ pub struct UserProfile {
     pub gender: Option<String>,
     pub birthday: Option<NaiveDate>,
     pub weight_kg: Option<f64>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 其他用户的公开资料（GET /users/:id）。
+/// 比 [UserProfile] 更严格：不暴露 email、体重等隐私字段。
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct PublicUserProfile {
+    pub id: Uuid,
+    pub nickname: String,
+    pub avatar_url: Option<String>,
+    pub bio: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

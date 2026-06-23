@@ -17,9 +17,6 @@ dependencies:
   # 路由
   go_router: ^14.8.1
 
-  # 后端
-  supabase_flutter: ^2.8.4
-
   # 地图 & 定位
   # （amap 官方插件 3.0.0 与新版 Flutter 不兼容，已换用 Mapbox 官方 SDK）
   mapbox_maps_flutter: ^2.23.1

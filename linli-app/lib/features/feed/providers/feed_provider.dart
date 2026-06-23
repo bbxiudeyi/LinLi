@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 
@@ -46,7 +47,8 @@ class FeedNotifier extends StateNotifier<FeedState> {
       }
 
       state = FeedState(activities: data, kudoMap: kudoMap, loading: false);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('加载 Feed 失败: $e');
       state = state.copyWith(loading: false);
     }
   }
@@ -63,7 +65,8 @@ class FeedNotifier extends StateNotifier<FeedState> {
       final newMap = Map<String, bool>.from(state.kudoMap);
       newMap[activityId] = !has;
       state = state.copyWith(kudoMap: newMap);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('切换点赞失败: $e');
       // 网络失败，状态不变
     }
   }
