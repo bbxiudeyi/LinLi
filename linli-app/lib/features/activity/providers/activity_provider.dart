@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import '../../../core/db/local_db.dart';
 import '../../../core/network/api_client.dart';
 import '../models/activity_models.dart';
 
@@ -38,28 +39,63 @@ class ActivityDetailState {
   });
 }
 
+/// 活动列表 + 上传同步控制器。
+///
+/// 离线策略：本地 DB 是"我的活动"的权威源。
+/// - loadMyActivities：本地优先（秒开），后台拉云端合并。
+/// - saveActivity：带客户端 id 上传，成功 markSynced，失败保留 sync_status=0。
+/// - retryUnsynced：扫描所有待同步活动逐个上传（App 启动/登录后触发）。
 class ActivityListNotifier extends StateNotifier<ActivityListState> {
   ActivityListNotifier() : super(const ActivityListState());
 
-  /// 从云端加载我的活动列表（按开始时间降序）。
+  /// 加载我的活动列表（本地优先：先读本地秒开，后台拉云端更新）。
   Future<void> loadMyActivities() async {
-    state = state.copyWith(loading: true);
+    // ① 本地优先：先读本地 DB，立即展示
+    try {
+      final local = await LocalDb.instance.listActivities();
+      if (!mounted) return;
+      state = ActivityListState(activities: local, loading: false);
+    } catch (e) {
+      debugPrint('读取本地活动列表失败: $e');
+    }
+
+    // ② 后台拉云端，合并更新（失败不影响本地展示）
     try {
       final res = await ApiClient.instance.dio.get('/activities');
-      final list = (res.data as List).cast<Map<String, dynamic>>();
-      state = ActivityListState(activities: list, loading: false);
+      final remote = (res.data as List).cast<Map<String, dynamic>>();
+      // 云端拉到的都是已同步的，写回本地（去重）
+      for (final a in remote) {
+        final id = a['id'] as String?;
+        if (id == null) continue;
+        await LocalDb.instance.insertActivity({
+          ...a,
+          'created_at': a['start_time'], // 本地表需要 created_at
+        });
+        await LocalDb.instance.markSynced(id);
+      }
+      // 重新读本地（合并云端 + 本地未同步的）
+      if (!mounted) return;
+      final merged = await LocalDb.instance.listActivities();
+      state = ActivityListState(activities: merged, loading: false);
     } catch (e) {
-      debugPrint('加载活动列表失败: $e');
-      state = state.copyWith(loading: false);
+      debugPrint('云端活动列表刷新失败（用本地缓存）: $e');
+      // 网络失败，保持本地数据，不动 state
     }
   }
 
-  /// 上传运动活动到云端。
-  /// 轨迹点转成多维格式 {lat, lng, ele, speed, time}，保留海拔/速度/时间。
+  /// 上传运动活动到云端（带客户端生成的 id，幂等）。
+  /// 数据已在录制时写入本地 DB，这里只负责上传 + 更新同步状态。
+  /// 返回活动 id（成功）；失败返回 null 但**数据不丢**（本地保留 sync_status=0）。
   Future<String?> saveActivity(ActivitySummary summary) async {
+    final activityId = summary.localActivityId;
+    if (activityId == null) {
+      debugPrint('saveActivity: 缺少 localActivityId');
+      return null;
+    }
     try {
       // 多维轨迹点：{lat, lng, ele, speed, time}（与后端 TrackPointInput 对齐）
-      final track = summary.gpsPoints.map((p) {
+      final track = summary.gpsPoints.asMap().entries.map((e) {
+        final p = e.value;
         return {
           'lat': p.latLng.latitude,
           'lng': p.latLng.longitude,
@@ -70,6 +106,7 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
       }).toList();
 
       final res = await ApiClient.instance.dio.post('/activities', data: {
+        'id': activityId, // ★ 客户端生成，本地 ID = 云端 ID
         'type': summary.type.name,
         'distance_m': summary.distanceMeters,
         'duration_s': summary.durationSeconds,
@@ -84,14 +121,69 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
         'end_time': summary.endTime.toUtc().toIso8601String(),
         'track': track,
       });
-      return res.data['id'] as String?;
+      final returnedId = res.data['id'] as String?;
+      // 上传成功，标记已同步
+      await LocalDb.instance.markSynced(activityId);
+      return returnedId ?? activityId;
     } on DioException catch (e) {
-      // 上传失败：打印错误便于排查（生产可改为本地缓存重试）
-      debugPrint('上传活动失败: ${e.response?.data}');
+      // 上传失败：数据已在本地（sync_status=0），不丢，等重试
+      debugPrint('上传活动失败（已存本地待重试）: ${e.response?.statusCode} ${e.response?.data}');
       return null;
     } catch (e) {
-      debugPrint('上传活动异常: $e');
+      debugPrint('上传活动异常（已存本地待重试）: $e');
       return null;
+    }
+  }
+
+  /// 扫描所有未同步的活动，逐个上传重试。
+  /// App 启动 / 登录成功后调用。幂等：后端 ON CONFLICT DO NOTHING 保证重传安全。
+  Future<void> retryUnsynced() async {
+    final unsynced = await LocalDb.instance.getUnsyncedActivities();
+    if (unsynced.isEmpty) return;
+    debugPrint('发现 ${unsynced.length} 条待同步活动，开始重试');
+
+    for (final row in unsynced) {
+      final activityId = row['id'] as String?;
+      if (activityId == null) continue;
+
+      // 从本地读轨迹点
+      final pointRows = await LocalDb.instance.getPoints(activityId);
+      if (pointRows.length < 2) {
+        debugPrint('活动 $activityId 点数不足，跳过');
+        continue;
+      }
+
+      final track = pointRows.map((p) => {
+        'lat': (p['lat'] as num).toDouble(),
+        'lng': (p['lng'] as num).toDouble(),
+        'ele': (p['ele'] as num?)?.toDouble(),
+        'speed': (p['speed'] as num?)?.toDouble(),
+        'time': p['recorded_at'] as String?,
+      }).toList();
+
+      try {
+        await ApiClient.instance.dio.post('/activities', data: {
+          'id': activityId,
+          'type': row['type'],
+          'distance_m': row['distance_m'],
+          'duration_s': row['duration_s'],
+          'moving_time_s': row['moving_time_s'],
+          'avg_pace_s_per_km': row['avg_pace_s_per_km'],
+          'avg_speed_kmh': row['avg_speed_kmh'],
+          'max_speed_kmh': row['max_speed_kmh'],
+          'elevation_gain_m': row['elevation_gain_m'],
+          'elevation_loss_m': row['elevation_loss_m'],
+          'calories': row['calories'],
+          'start_time': row['start_time'],
+          'end_time': row['end_time'],
+          'track': track,
+        });
+        await LocalDb.instance.markSynced(activityId);
+        debugPrint('活动 $activityId 同步成功');
+      } catch (e) {
+        debugPrint('活动 $activityId 重试失败: $e');
+        // 继续下一条，下次启动再试
+      }
     }
   }
 }
@@ -101,20 +193,45 @@ final activityListProvider =
   (ref) => ActivityListNotifier(),
 );
 
-/// 按活动 ID 从云端拉取详情（活动行 + 轨迹点）。
+/// 按活动 ID 加载详情（本地优先 + 云端刷新）。
 class ActivityDetailNotifier
     extends FamilyNotifier<ActivityDetailState, String> {
+  bool _disposed = false;
+
+  ActivityDetailNotifier() {
+    // FamilyNotifier 无 mounted 属性，用 onDispose 标志位防止销毁后写 state
+    // （build 执行时 ref 才可用，故在构造里注册）
+  }
+
   @override
   ActivityDetailState build(String activityId) {
+    ref.onDispose(() => _disposed = true);
     _load(activityId);
     return const ActivityDetailState(loading: true);
   }
 
   Future<void> _load(String activityId) async {
+    // ① 本地优先：先读本地，秒开（含离线/未同步的活动）
+    try {
+      final local = await LocalDb.instance.getActivity(activityId);
+      final pointRows = await LocalDb.instance.getPoints(activityId);
+      if (local != null) {
+        final points = _rowsToPoints(pointRows, local['start_time'] as String?);
+        if (_disposed) return;
+        state = ActivityDetailState(
+          activity: local,
+          points: points,
+          loading: false,
+        );
+      }
+    } catch (e) {
+      debugPrint('读取本地活动详情失败: $e');
+    }
+
+    // ② 后台拉云端刷新（失败不影响本地展示）
     try {
       final res = await ApiClient.instance.dio.get('/activities/$activityId');
       final data = res.data as Map<String, dynamic>;
-      // 后端返回多维点 track: [{seq, lat, lng, ele, speed, recorded_at}, ...]
       final trackPoints = (data['track'] as List?) ?? [];
       final points = trackPoints.map((raw) {
         final p = raw as Map<String, dynamic>;
@@ -133,16 +250,41 @@ class ActivityDetailNotifier
         );
       }).toList();
 
-      // 移除 track 字段（避免 activity map 太大）
       final activityMap = Map<String, dynamic>.from(data);
       activityMap.remove('track');
 
+      if (_disposed) return;
       state = ActivityDetailState(
           activity: activityMap, points: points, loading: false);
     } catch (e) {
-      debugPrint('加载活动详情失败: $e');
-      state = const ActivityDetailState(loading: false);
+      debugPrint('云端活动详情刷新失败（用本地）: $e');
+      // 网络失败保持本地数据；本地也没有则停止 loading
+      if (state.activity == null && !_disposed) {
+        state = const ActivityDetailState(loading: false);
+      }
     }
+  }
+
+  /// 本地点表行 → GpsPoint 列表。
+  List<GpsPoint> _rowsToPoints(
+      List<Map<String, dynamic>> rows, String? fallbackTime) {
+    return rows.map((p) {
+      final recorded = p['recorded_at'] as String?;
+      return GpsPoint(
+        latLng: LatLng(
+          (p['lat'] as num).toDouble(),
+          (p['lng'] as num).toDouble(),
+        ),
+        altitude: (p['ele'] as num?)?.toDouble() ?? 0,
+        speed: (p['speed'] as num?)?.toDouble() ?? 0,
+        accuracy: 0,
+        timestamp: recorded != null
+            ? DateTime.parse(recorded)
+            : (fallbackTime != null && fallbackTime.isNotEmpty
+                ? DateTime.parse(fallbackTime)
+                : DateTime.now()),
+      );
+    }).toList();
   }
 
   /// 下载活动的 GPX 文件（返回 XML 字符串，由调用方决定分享/保存）。

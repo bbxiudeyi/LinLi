@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/db/local_db.dart';
 import '../../../core/network/api_client.dart';
 import '../../auth/providers/auth_provider.dart';
 
@@ -32,7 +33,8 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
   final Ref _ref;
   ProfileNotifier(this._ref) : super(const ProfileState());
 
-  /// 从云端加载当前用户资料 + 最近活动。
+  /// 加载当前用户资料 + 最近活动（本地优先，后台云端刷新）。
+  /// 本地优先：秒开 + 离线可用；活动列表读本地（含未同步的）。
   Future<void> loadProfile() async {
     final user = _ref.read(authProvider).user;
     if (user == null) {
@@ -40,28 +42,51 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
       return;
     }
 
-    state = state.copyWith(loading: true);
+    // ① 本地优先：先读本地缓存，立即展示
     try {
-      // 并行请求：用户资料 + 活动列表
-      final profileRes = await ApiClient.instance.dio.get('/auth/me');
-      final activitiesRes = await ApiClient.instance.dio.get(
-        '/activities',
-        queryParameters: {'limit': 10},
-      );
+      final cachedProfile = await LocalDb.instance.getMyProfile();
+      final localActivities = await LocalDb.instance.listActivities(limit: 10);
+      if (!mounted) return;
+      if (cachedProfile != null || localActivities.isNotEmpty) {
+        state = ProfileState(
+          profile: cachedProfile,
+          recentActivities: localActivities,
+          loading: false,
+        );
+      } else {
+        // 本地无数据，显示 loading 等云端
+        state = state.copyWith(loading: true);
+      }
+    } catch (e) {
+      debugPrint('读取本地资料失败: $e');
+      state = state.copyWith(loading: true);
+    }
 
+    // ② 后台拉云端刷新（失败用本地兜底，不报错）
+    try {
+      final profileRes = await ApiClient.instance.dio.get('/auth/me');
+      final profile = profileRes.data as Map<String, dynamic>;
+      // 写入本地缓存
+      await LocalDb.instance.saveMyProfile(profile);
+
+      // 重新读本地活动（合并云端后），保证未同步的也显示
+      final activities = await LocalDb.instance.listActivities(limit: 10);
+
+      if (!mounted) return;
       state = ProfileState(
-        profile: profileRes.data as Map<String, dynamic>,
-        recentActivities:
-            (activitiesRes.data as List).cast<Map<String, dynamic>>(),
+        profile: profile,
+        recentActivities: activities,
         loading: false,
       );
     } catch (e) {
-      debugPrint('加载个人资料失败: $e');
+      debugPrint('云端资料刷新失败（用本地缓存）: $e');
+      // 网络失败，保持本地数据
+      if (!mounted) return;
       state = state.copyWith(loading: false);
     }
   }
 
-  /// 更新资料到云端，成功后刷新本地 state。
+  /// 更新资料到云端，成功后刷新本地 state + 本地缓存。
   /// 若服务端返回新 token（改密码时会重签），同步更新本地 token。
   Future<bool> updateProfile(Map<String, dynamic> fields) async {
     try {
@@ -72,8 +97,10 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
       if (newToken != null && newToken.isNotEmpty) {
         await ApiClient.instance.saveToken(newToken);
       }
-      // 用服务器返回的完整 profile 覆盖本地（token 字段已剥离，不入 state）
+      // 用服务器返回的完整 profile 覆盖本地（token 字段已剥离）
       final profile = Map<String, dynamic>.from(data)..remove('token');
+      // 写入本地缓存
+      await LocalDb.instance.saveMyProfile(profile);
       state = state.copyWith(profile: profile);
       return true;
     } on DioException catch (e) {

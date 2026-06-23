@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_client.dart';
+import '../../activity/providers/activity_provider.dart';
 
 enum AuthStatus { unknown, authenticated, unauthenticated }
 
@@ -65,7 +66,8 @@ class AuthState {
 /// 云端认证：邮箱 + 密码。
 /// 调用 Rust 后端 /api/v1/auth/* 接口。
 class AuthNotifier extends StateNotifier<AuthState> {
-  AuthNotifier() : super(const AuthState()) {
+  final Ref _ref;
+  AuthNotifier(this._ref) : super(const AuthState()) {
     _init();
   }
 
@@ -82,11 +84,22 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final res = await ApiClient.instance.dio.get('/auth/me');
       final user = RemoteUser.fromJson(res.data as Map<String, dynamic>);
       state = AuthState(status: AuthStatus.authenticated, user: user);
+      // 登录态恢复成功，触发待同步活动的重试（fire-and-forget）
+      _triggerSync();
     } catch (_) {
       // token 失效，清除
       await ApiClient.instance.clearToken();
       state = state.copyWith(status: AuthStatus.unauthenticated);
     }
+  }
+
+  /// fire-and-forget 触发待同步活动重试。
+  void _triggerSync() {
+    Future(() async {
+      try {
+        await _ref.read(activityListProvider.notifier).retryUnsynced();
+      } catch (_) {}
+    });
   }
 
   /// 登录（邮箱 + 密码）。
@@ -101,6 +114,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final user = RemoteUser.fromJson(res.data['user'] as Map<String, dynamic>);
       await ApiClient.instance.saveToken(token);
       state = AuthState(status: AuthStatus.authenticated, user: user);
+      _triggerSync();
     } on DioException catch (e) {
       final msg = e.response?.data?['error'] as String? ?? '登录失败';
       state = state.copyWith(error: msg);
@@ -121,6 +135,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final user = RemoteUser.fromJson(res.data['user'] as Map<String, dynamic>);
       await ApiClient.instance.saveToken(token);
       state = AuthState(status: AuthStatus.authenticated, user: user);
+      _triggerSync();
     } on DioException catch (e) {
       final msg = e.response?.data?['error'] as String? ?? '注册失败';
       state = state.copyWith(error: msg);
@@ -143,5 +158,5 @@ class AuthNotifier extends StateNotifier<AuthState> {
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>(
-  (ref) => AuthNotifier(),
+  (ref) => AuthNotifier(ref),
 );

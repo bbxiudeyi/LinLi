@@ -105,6 +105,28 @@ pub async fn create_activity(
         )));
     }
 
+    // ★ 幂等：若客户端传入 id，检查是否已存在
+    //   - 属于本人 → 视为重传，直接返回（活动可能上次上传部分成功）
+    //   - 属于他人 → 极小概率的 id 碰撞，拒绝
+    //   - 不存在 → 正常插入
+    let id = req.id.unwrap_or_else(|| Uuid::new_v4());
+    if req.id.is_some() {
+        let existing: Option<(Uuid,)> =
+            sqlx::query_as("SELECT user_id FROM activities WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&state.db)
+                .await?;
+        if let Some((owner,)) = existing {
+            if owner != user_id {
+                return Err(AppError::BadRequest(
+                    "activity id 已被占用（与本人不匹配）".into(),
+                ));
+            }
+            // 属于本人的重传，直接返回 id（活动行+点表上次可能已写入）
+            return Ok(Json(serde_json::json!({ "id": id })));
+        }
+    }
+
     // 用事务保证原子性：activities 行 + activity_points 行一起成功或一起失败
     let mut tx = state.db.begin().await?;
 
@@ -116,17 +138,19 @@ pub async fn create_activity(
         .collect();
     let linestring_wkt = format!("LINESTRING({})", coords.join(", "));
 
-    let id: Uuid = sqlx::query_scalar(
+    // 用客户端传入的 id 插入；ON CONFLICT 兜底防并发重复（理论上上面已检查）
+    sqlx::query(
         r#"INSERT INTO activities (
-              user_id, type, distance_m, duration_s, moving_time_s,
+              id, user_id, type, distance_m, duration_s, moving_time_s,
               avg_pace_s_per_km, avg_speed_kmh, max_speed_kmh,
               elevation_gain_m, elevation_loss_m, calories,
               start_time, end_time, track, title, description, is_private
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                   ST_GeomFromText($14, 4326), $15, $16, $17)
-           RETURNING id"#,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                   ST_GeomFromText($15, 4326), $16, $17, $18)
+           ON CONFLICT (id) DO NOTHING"#,
     )
+    .bind(id)
     .bind(user_id)
     .bind(&req.sport_type)
     .bind(req.distance_m)
@@ -144,10 +168,11 @@ pub async fn create_activity(
     .bind(&req.title)
     .bind(&req.description)
     .bind(req.is_private.unwrap_or(false))
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await?;
 
     // ② 批量插入多维点到 activity_points（UNNEST 一次插入，避免 N 次 INSERT）
+    //    ON CONFLICT DO NOTHING：重传时已存在的点不重复插入
     let n = req.track.len();
     let mut seqs = Vec::with_capacity(n);
     let mut lats = Vec::with_capacity(n);
@@ -170,7 +195,8 @@ pub async fn create_activity(
            SELECT $1, * FROM UNNEST(
              $2::int[], $3::float8[], $4::float8[],
              $5::float8[], $6::float8[], $7::timestamptz[]
-           )"#,
+           )
+           ON CONFLICT (activity_id, seq) DO NOTHING"#,
     )
     .bind(id)
     .bind(&seqs)

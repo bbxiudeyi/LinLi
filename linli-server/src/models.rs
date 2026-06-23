@@ -152,6 +152,9 @@ pub struct TrackPointOutput {
 /// 上传活动的请求体。
 #[derive(Debug, Deserialize, validator::Validate)]
 pub struct CreateActivityRequest {
+    /// 客户端生成的活动 UUID（离线录制时已生成）。
+    /// 传入则用之，使本地 ID = 云端 ID；不传则服务端自动生成（兼容旧客户端/直接 curl）。
+    pub id: Option<Uuid>,
     #[serde(rename = "type")]
     pub sport_type: String, // "run" / "ride" / "hike" / "walk"
     pub distance_m: i32,

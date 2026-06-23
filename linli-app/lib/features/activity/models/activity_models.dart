@@ -48,6 +48,7 @@ class GpsPoint {
 
 class ActivitySummary {
   final SportType type;
+  final String? localActivityId; // 本地/云端共用的活动 UUID（离线录制时生成）
   final int distanceMeters;
   final int durationSeconds;
   final int movingTimeSeconds;
@@ -63,6 +64,7 @@ class ActivitySummary {
 
   const ActivitySummary({
     required this.type,
+    this.localActivityId,
     required this.distanceMeters,
     required this.durationSeconds,
     required this.movingTimeSeconds,

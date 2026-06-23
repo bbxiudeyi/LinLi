@@ -2,10 +2,12 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:uuid/uuid.dart';
+import '../../../core/db/local_db.dart';
 import '../../../core/location/location_service.dart';
 import '../models/activity_models.dart';
 
-enum RecordingState { idle, recording, paused }
+enum RecordingState { idle, ready, recording, paused, stopped }
 
 class TrackingState {
   final RecordingState state;
@@ -18,6 +20,9 @@ class TrackingState {
   final double currentPaceMinPerKm;
   final double elevationGain;
   final double maxSpeedKmh;
+  /// 本次录制对应的本地活动 ID（客户端生成的 UUID v4）。
+  /// 录制开始时生成，同步本地 DB + buildSummary，作为云端活动 ID。
+  final String? localActivityId;
   /// 定位错误提示（权限拒绝、服务关闭等），null 表示无错误
   final String? locationError;
 
@@ -32,6 +37,7 @@ class TrackingState {
     this.currentPaceMinPerKm = 0,
     this.elevationGain = 0,
     this.maxSpeedKmh = 0,
+    this.localActivityId,
     this.locationError,
   });
 
@@ -46,6 +52,7 @@ class TrackingState {
     double? currentPaceMinPerKm,
     double? elevationGain,
     double? maxSpeedKmh,
+    String? localActivityId,
     String? locationError,
   }) {
     return TrackingState(
@@ -59,6 +66,7 @@ class TrackingState {
       currentPaceMinPerKm: currentPaceMinPerKm ?? this.currentPaceMinPerKm,
       elevationGain: elevationGain ?? this.elevationGain,
       maxSpeedKmh: maxSpeedKmh ?? this.maxSpeedKmh,
+      localActivityId: localActivityId ?? this.localActivityId,
       locationError: locationError ?? this.locationError,
     );
   }
@@ -122,14 +130,22 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
   GpsTrackerNotifier() : super(const TrackingState());
 
   void selectSport(SportType type) {
-    state = state.copyWith(sportType: type);
+    // 选完运动类型进入"准备"状态，等用户点"开始"才真正录制
+    state = state.copyWith(sportType: type, state: RecordingState.ready);
   }
 
-  /// 开始录制。会先检查定位权限，失败时把错误写入 [TrackingState.locationError]。
+  /// 用户点了"开始"按钮，真正开始录制。
+  /// 会先检查定位权限，失败时把错误写入 [TrackingState.locationError]。
   ///
   /// 关键：先把第一个 GPS 点拿到，再把 state 切到 recording——
   /// 这样地图一出现就已经有定位点，直接定位到那里，不会先跳默认视野（北京）。
-  Future<void> start() async {
+  ///
+  /// 离线防丢：开始时在本地 DB 创建活动行（sync_status=0 待同步），
+  /// 之后每个 GPS 点实时写入 activity_points 表，App 被杀也不丢。
+  Future<void> beginRecording() async {
+    // 只允许从 ready 态开始（避免重复触发）
+    if (state.state != RecordingState.ready) return;
+
     try {
       await LocationService.ensureReady();
     } on LocationException catch (e) {
@@ -139,7 +155,17 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
 
     _startTime = DateTime.now();
 
-    // 先拿一次当前位置（不切 state，页面还停在运动选择页）
+    // 生成活动 UUID（本地 ID = 云端 ID），并在本地 DB 建活动行
+    final activityId = const Uuid().v4();
+    await LocalDb.instance.insertActivity({
+      'id': activityId,
+      'type': state.sportType.name,
+      'start_time': _startTime!.toUtc().toIso8601String(),
+      'created_at': _startTime!.toUtc().toIso8601String(),
+    });
+    state = state.copyWith(localActivityId: activityId);
+
+    // 先拿一次当前位置（不切 state，页面还在准备态）
     Position? initial;
     try {
       initial = await LocationService.getCurrentPosition();
@@ -181,10 +207,17 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
     _startLocationStream();
   }
 
+  /// 停止录制：停定时器/定位流，切到 stopped 态（触发保存页显示）。
+  /// 数据保留，等保存页点"保存"后由 provider 的 saveActivity + reset 处理。
   void stop() {
     _timer?.cancel();
     _positionSub?.cancel();
-    state = state.copyWith(state: RecordingState.idle);
+    state = state.copyWith(state: RecordingState.stopped);
+  }
+
+  /// 放弃本次录制（保存页点"放弃"用）：清空一切回 idle。
+  void discard() {
+    reset();
   }
 
   void _startTimer() {
@@ -258,6 +291,22 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
     _lastValidTime = now;
     _movingSeconds = newMovingSeconds;
 
+    // ===== 离线防丢：把该点实时写入本地 DB =====
+    // 即使 App 被杀，下次启动也能从本地恢复已录的轨迹。
+    final activityId = state.localActivityId;
+    if (activityId != null) {
+      final seq = state.gpsPoints.length; // 本点在轨迹中的序号
+      LocalDb.instance.appendPoint(
+        activityId,
+        seq,
+        p.latitude,
+        p.longitude,
+        ele: p.altitude,
+        speed: p.speed,
+        recordedAt: p.timestamp.toUtc().toIso8601String(),
+      );
+    }
+
     final speedKmh = newPoint.speed > 0 ? newPoint.speed * 3.6 : 0.0;
     final paceMinPerKm = speedKmh > 0 ? 60.0 / speedKmh : 0.0;
 
@@ -272,7 +321,9 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
     );
   }
 
-  ActivitySummary? buildSummary() {
+  /// 结束录制，构建汇总并写回本地活动行的最终统计。
+  /// 返回 null 表示没有有效数据（无点或无开始时间）。
+  Future<ActivitySummary?> buildSummary() async {
     if (state.gpsPoints.isEmpty || _startTime == null) return null;
 
     final endTime = DateTime.now();
@@ -287,9 +338,28 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
     final avgPace = state.distanceMeters > 0
         ? (movingSecs / (state.distanceMeters / 1000)).round()
         : 0;
+    final calories = (state.distanceMeters * 0.06).round();
+
+    // 把最终统计写回本地活动行（录制期间只有 start_time，现在补全）
+    final activityId = state.localActivityId;
+    if (activityId != null) {
+      await LocalDb.instance.updateActivityStats(activityId, {
+        'distance_m': state.distanceMeters,
+        'duration_s': state.durationSeconds,
+        'moving_time_s': movingSecs,
+        'avg_pace_s_per_km': avgPace,
+        'avg_speed_kmh': avgSpeed,
+        'max_speed_kmh': state.maxSpeedKmh,
+        'elevation_gain_m': state.elevationGain,
+        'elevation_loss_m': 0,
+        'calories': calories,
+        'end_time': endTime.toUtc().toIso8601String(),
+      });
+    }
 
     return ActivitySummary(
       type: state.sportType,
+      localActivityId: activityId,
       distanceMeters: state.distanceMeters,
       durationSeconds: state.durationSeconds,
       movingTimeSeconds: movingSecs,
@@ -298,7 +368,7 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
       maxSpeedKmh: state.maxSpeedKmh,
       elevationGain: state.elevationGain,
       elevationLoss: 0,
-      calories: (state.distanceMeters * 0.06).round(),
+      calories: calories,
       startTime: _startTime!,
       endTime: endTime,
       gpsPoints: state.gpsPoints,

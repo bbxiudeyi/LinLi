@@ -217,10 +217,32 @@ class _RecentActivities extends StatelessWidget {
               'hike': '🥾',
               'walk': '🚶',
             }[type] ?? '🏃';
+            // 本地活动行带 sync_status：0=待同步, 1=已同步
+            final synced = (activity['sync_status'] as int?) == 1;
 
             return ListTile(
               leading: Text(sportIcon, style: const TextStyle(fontSize: 24)),
-              title: Text(activity['title'] ?? distanceStr),
+              title: Row(
+                children: [
+                  Flexible(
+                      child: Text(activity['title'] ?? distanceStr)),
+                  if (!synced) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text('未同步',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.orange.shade800)),
+                    ),
+                  ],
+                ],
+              ),
               subtitle: Text(distanceStr),
               trailing: const Icon(Icons.chevron_right),
               onTap: () =>
