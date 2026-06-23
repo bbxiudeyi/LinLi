@@ -1,0 +1,32 @@
+# Caddy 配置：统一入口，反代 + 自动 HTTPS
+# 部署时把 {$DOMAIN} 换成真实域名，或用环境变量传入
+
+{$DOMAIN} {
+    # /api/* 反代到 Rust 后端
+    handle /api/* {
+        reverse_proxy api:8080
+    }
+
+    # 其他请求反代到 Vue 网页（nginx 容器）
+    handle {
+        reverse_proxy web:80
+    }
+
+    # 常用安全头
+    header {
+        # 不允许 iframe 嵌套（防点击劫持）
+        X-Frame-Options "DENY"
+        # MIME 类型嗅探防护
+        X-Content-Type-Options "nosniff"
+        # 启用浏览器 XSS 防护
+        X-XSS-Protection "1; mode=block"
+        # HSTS：强制 HTTPS（首次访问后记住）
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+
+    # 日志
+    log {
+        output stdout
+        format json
+    }
+}

@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock  # 二进制项目应该提交 Cargo.lock，但为了避免冲突暂时忽略（如果是库则不应该忽略）
+# 注：linli-server 是二进制，建议提交 Cargo.lock 保证构建可重现。
+# 如果想提交，删掉上面这行。
+
+# 环境变量（含密码/JWT secret，绝对不能推）
+.env
+.env.prod
+.env.local
+
+# 日志
+*.log
+_buildlog.txt
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db

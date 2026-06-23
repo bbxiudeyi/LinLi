@@ -1,0 +1,32 @@
+# ============================================
+# 林立 monorepo 根 .gitignore
+# 子目录（linli-app, linli-server, linli-web）有自己的 .gitignore
+# ============================================
+
+# 敏感环境变量（含密码/密钥，绝对不能推）
+.env
+.env.prod
+.env.local
+
+# 编辑器/IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时/缓存
+*.log
+*.tmp
+tmp/
+
+# Docker（卷数据不推）
+docker-data/
+
+# 截图/调试文件
+*.png
+*.jpg
+screen*.png
