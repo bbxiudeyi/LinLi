@@ -1,8 +1,11 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{ActivityDetail, ActivityListItem, CreateActivityRequest};
+use crate::models::{
+    ActivityDetail, ActivityListItem, CreateActivityRequest, TrackPointOutput,
+};
 use crate::AppState;
 use axum::extract::{Path, Query, State};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -77,7 +80,7 @@ pub async fn create_activity(
             VALID_TYPES
         )));
     }
-    // ★ S2 安全限制：轨迹点数、距离、时长的合理上限
+    // 校验点数上限
     const MAX_TRACK_POINTS: usize = 50_000; // 单次最多 5 万点（约马拉松级）
     const MAX_DISTANCE_M: i32 = 1_000_000; // 1000 km
     const MAX_DURATION_S: i32 = 24 * 3600; // 24 小时
@@ -102,11 +105,14 @@ pub async fn create_activity(
         )));
     }
 
-    // 把 [[lng, lat], ...] 拼成 PostGIS 的 WKT / 直接用 ST_GeomFromGeoJSON
+    // 用事务保证原子性：activities 行 + activity_points 行一起成功或一起失败
+    let mut tx = state.db.begin().await?;
+
+    // ① 插入 activities 主行（track LineString 仍写，地图快速渲染用）
     let coords: Vec<String> = req
         .track
         .iter()
-        .map(|(lng, lat)| format!("{lng} {lat}"))
+        .map(|p| format!("{} {}", p.lng, p.lat))
         .collect();
     let linestring_wkt = format!("LINESTRING({})", coords.join(", "));
 
@@ -138,8 +144,45 @@ pub async fn create_activity(
     .bind(&req.title)
     .bind(&req.description)
     .bind(req.is_private.unwrap_or(false))
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
+
+    // ② 批量插入多维点到 activity_points（UNNEST 一次插入，避免 N 次 INSERT）
+    let n = req.track.len();
+    let mut seqs = Vec::with_capacity(n);
+    let mut lats = Vec::with_capacity(n);
+    let mut lngs = Vec::with_capacity(n);
+    let mut eles = Vec::with_capacity(n);
+    let mut speeds = Vec::with_capacity(n);
+    let mut times = Vec::with_capacity(n);
+    for (i, p) in req.track.iter().enumerate() {
+        seqs.push(i as i32);
+        lats.push(p.lat);
+        lngs.push(p.lng);
+        eles.push(p.ele);
+        speeds.push(p.speed);
+        times.push(p.time);
+    }
+
+    sqlx::query(
+        r#"INSERT INTO activity_points
+             (activity_id, seq, lat, lng, ele, speed, recorded_at)
+           SELECT $1, * FROM UNNEST(
+             $2::int[], $3::float8[], $4::float8[],
+             $5::float8[], $6::float8[], $7::timestamptz[]
+           )"#,
+    )
+    .bind(id)
+    .bind(&seqs)
+    .bind(&lats)
+    .bind(&lngs)
+    .bind(&eles)
+    .bind(&speeds)
+    .bind(&times)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
 
     Ok(Json(serde_json::json!({ "id": id })))
 }
@@ -177,17 +220,16 @@ pub async fn get_activity(
         return Err(AppError::Forbidden);
     }
 
-    // 3. 单独查轨迹（ST_AsGeoJSON 输出 GeoJSON LineString）
-    let track_geojson: Option<(String,)> = sqlx::query_as(
-        "SELECT ST_AsGeoJSON(track)::text FROM activities WHERE id = $1",
+    // 3. 查多维轨迹点（按 seq 排序，含海拔/速度/时间）
+    let track: Vec<TrackPointOutput> = sqlx::query_as(
+        r#"SELECT seq, lat, lng, ele, speed, recorded_at
+           FROM activity_points
+           WHERE activity_id = $1
+           ORDER BY seq"#,
     )
     .bind(id)
-    .fetch_optional(&state.db)
+    .fetch_all(&state.db)
     .await?;
-
-    let track = parse_geojson_linestring(
-        &track_geojson.and_then(|(s,)| if s.is_empty() { None } else { Some(s) }).unwrap_or_default(),
-    )?;
 
     Ok(Json(ActivityDetail { item, track }))
 }
@@ -216,30 +258,123 @@ pub async fn delete_activity(
     Ok(Json(serde_json::json!({ "deleted": id })))
 }
 
-// ==================== GeoJSON 解析 ====================
+// ==================== GPX 导出 ====================
 
-/// 解析 PostGIS `ST_AsGeoJSON` 输出的 LineString JSON。
-/// 输入示例：`{"type":"LineString","coordinates":[[116.4,39.9],[116.5,39.9]]}`
-fn parse_geojson_linestring(geojson_str: &str) -> AppResult<Vec<(f64, f64)>> {
-    if geojson_str.is_empty() {
-        return Ok(vec![]);
+/// 加载活动的基础信息 + 所有权校验。
+/// 返回 (sport_type, title, owner_id)，用于 GPX 生成和权限判断。
+async fn load_activity_meta(
+    state: &AppState,
+    id: Uuid,
+    user_id: Uuid,
+) -> AppResult<(String, Option<String>, Uuid, bool)> {
+    let row: Option<(String, Option<String>, Uuid, bool)> = sqlx::query_as(
+        r#"SELECT type, title, user_id, is_private FROM activities WHERE id = $1"#,
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?;
+    let (sport_type, title, owner_id, is_private) = row.ok_or(AppError::NotFound)?;
+    // 私密活动只有本人可导出
+    if is_private && owner_id != user_id {
+        return Err(AppError::Forbidden);
     }
-    let parsed: serde_json::Value =
-        serde_json::from_str(geojson_str).map_err(|e| AppError::GeoJson(e.to_string()))?;
-    let coords = parsed
-        .get("coordinates")
-        .and_then(|c| c.as_array())
-        .ok_or_else(|| AppError::GeoJson("coordinates 字段缺失".into()))?;
-    coords
-        .iter()
-        .map(|p| {
-            let arr = p.as_array().ok_or_else(|| AppError::GeoJson("坐标格式错误".into()))?;
-            if arr.len() < 2 {
-                return Err(AppError::GeoJson("坐标至少 2 维".into()));
-            }
-            let lng = arr[0].as_f64().ok_or_else(|| AppError::GeoJson("lng 非 number".into()))?;
-            let lat = arr[1].as_f64().ok_or_else(|| AppError::GeoJson("lat 非 number".into()))?;
-            Ok((lng, lat))
-        })
-        .collect()
+    Ok((sport_type, title, owner_id, is_private))
+}
+
+/// GET /api/v1/activities/:id/export.gpx
+///
+/// 从 activity_points 实时生成 GPX 1.1 文件下载。
+/// 不引入 XML 依赖：GPX 结构简单，用字符串拼接 + 转义即可。
+pub async fn export_gpx(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Response> {
+    let (sport_type, title, _owner_id, _is_private) =
+        load_activity_meta(&state, id, user_id).await?;
+
+    // 查多维点
+    let points: Vec<TrackPointOutput> = sqlx::query_as(
+        r#"SELECT seq, lat, lng, ele, speed, recorded_at
+           FROM activity_points WHERE activity_id = $1 ORDER BY seq"#,
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let name = xml_escape(&title.unwrap_or_else(|| sport_type.clone()));
+
+    // 拼接 GPX 1.1（手写，符合 GPX 1.1 schema）
+    let mut xml = String::with_capacity(256 + points.len() * 120);
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str("<gpx version=\"1.1\" creator=\"LinLi\" ");
+    xml.push_str("xmlns=\"http://www.topografix.com/GPX/1/1\">\n");
+
+    // 元数据
+    xml.push_str("  <metadata>\n");
+    xml.push_str(&format!("    <name>{name}</name>\n"));
+    xml.push_str("    <author><name>LinLi</name></author>\n");
+    xml.push_str("  </metadata>\n");
+
+    // 轨迹
+    xml.push_str("  <trk>\n");
+    xml.push_str(&format!("    <name>{name}</name>\n"));
+    xml.push_str("    <type>");
+    xml.push_str(&sport_type);
+    xml.push_str("</type>\n");
+    xml.push_str("    <trkseg>\n");
+
+    for p in &points {
+        // lat/lon 是 trkpt 的属性（必填）
+        xml.push_str(&format!(
+            "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\">\n",
+            p.lat, p.lng
+        ));
+        if let Some(ele) = p.ele {
+            xml.push_str(&format!("        <ele>{:.2}</ele>\n", ele));
+        }
+        if let Some(t) = p.recorded_at {
+            // GPX 要求 ISO8601 UTC，带 Z
+            xml.push_str(&format!(
+                "        <time>{}</time>\n",
+                t.format("%Y-%m-%dT%H:%M:%SZ")
+            ));
+        }
+        if let Some(s) = p.speed {
+            // 速度存到扩展字段（GPX 1.1 无标准速度元素，用 extensions）
+            xml.push_str("        <extensions>\n");
+            xml.push_str(&format!(
+                "          <speed>{:.2}</speed>\n",
+                s
+            ));
+            xml.push_str("        </extensions>\n");
+        }
+        xml.push_str("      </trkpt>\n");
+    }
+
+    xml.push_str("    </trkseg>\n  </trk>\n</gpx>\n");
+
+    // 构建下载响应
+    let filename = format!("linli-{}.gpx", id);
+    let content_type: axum::http::HeaderValue =
+        "application/gpx+xml; charset=utf-8".parse().unwrap();
+    let disposition: axum::http::HeaderValue =
+        format!("attachment; filename=\"{filename}\"").parse().unwrap();
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (axum::http::header::CONTENT_DISPOSITION, disposition),
+        ],
+        xml,
+    )
+        .into_response())
+}
+
+/// XML 文本转义（& < > " '）。
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }

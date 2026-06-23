@@ -70,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/activities", post(handlers::activity::create_activity))
         .route("/api/v1/activities/:id", get(handlers::activity::get_activity))
         .route("/api/v1/activities/:id", delete(handlers::activity::delete_activity))
+        .route("/api/v1/activities/:id/export.gpx", get(handlers::activity::export_gpx))
         // 点赞
         .route("/api/v1/activities/:id/kudos", post(handlers::social::add_kudo))
         .route(

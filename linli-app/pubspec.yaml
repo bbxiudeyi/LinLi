@@ -41,6 +41,9 @@ dependencies:
   # 工具（path_provider 由 shared_preferences 间接依赖）
   path_provider: ^2.1.5
 
+  # 分享（GPX 文件导出用）
+  share_plus: ^10.1.4
+
   # 图标
   cupertino_icons: ^1.0.8
 

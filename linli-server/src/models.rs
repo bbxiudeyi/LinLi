@@ -120,15 +120,33 @@ pub enum SportType {
     Walk,
 }
 
-/// 轨迹点（客户端上传格式，GeoJSON LineString 的一个坐标）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrackPoint {
+/// 轨迹点（多维：经纬度 + 海拔 + 速度 + 采集时间）。
+///
+/// 客户端上传用 [TrackPointInput]（含 time 字段）；
+/// 服务端返回用 [TrackPointOutput]（补 seq 序号）。
+/// 这两个字段共同取代旧版 `[[lng, lat], ...]` 的纯坐标格式，
+/// 以保留海拔/速度/时间，供详情页海拔剖面、配速曲线、GPX 导出。
+
+/// 客户端上传的轨迹点。
+/// time 为 ISO8601 字符串（客户端 toIso8601String() 产出）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct TrackPointInput {
     pub lat: f64,
     pub lng: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub altitude: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ele: Option<f64>,
     pub speed: Option<f64>,
+    pub time: Option<DateTime<Utc>>,
+}
+
+/// 服务端返回的轨迹点（比 input 多 seq）。
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct TrackPointOutput {
+    pub seq: i32,
+    pub lat: f64,
+    pub lng: f64,
+    pub ele: Option<f64>,
+    pub speed: Option<f64>,
+    pub recorded_at: Option<DateTime<Utc>>,
 }
 
 /// 上传活动的请求体。
@@ -147,8 +165,8 @@ pub struct CreateActivityRequest {
     pub calories: Option<i32>,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
-    /// 轨迹坐标序列 [[lng, lat], ...]（GeoJSON LineString 坐标格式）
-    pub track: Vec<(f64, f64)>,
+    /// 多维轨迹点序列（含海拔/速度/时间）
+    pub track: Vec<TrackPointInput>,
     pub title: Option<String>,
     pub description: Option<String>,
     pub is_private: Option<bool>,
@@ -188,11 +206,11 @@ pub struct ActivityListItem {
     pub has_kudo: Option<bool>,
 }
 
-/// 活动详情（含完整轨迹）。
+/// 活动详情（含完整多维轨迹）。
 #[derive(Debug, Serialize)]
 pub struct ActivityDetail {
     #[serde(flatten)]
     pub item: ActivityListItem,
-    /// [[lng, lat], ...]
-    pub track: Vec<(f64, f64)>,
+    /// 多维轨迹点（含海拔/速度/时间）
+    pub track: Vec<TrackPointOutput>,
 }

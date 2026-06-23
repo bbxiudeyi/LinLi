@@ -55,13 +55,19 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
   }
 
   /// 上传运动活动到云端。
-  /// 把 GpsPoint[] 转成后端要求的 [[lng, lat], ...] GeoJSON 坐标格式。
+  /// 轨迹点转成多维格式 {lat, lng, ele, speed, time}，保留海拔/速度/时间。
   Future<String?> saveActivity(ActivitySummary summary) async {
     try {
-      // 轨迹点转 [[lng, lat], ...]（GeoJSON LineString 坐标格式）
-      final track = summary.gpsPoints
-          .map((p) => [p.latLng.longitude, p.latLng.latitude])
-          .toList();
+      // 多维轨迹点：{lat, lng, ele, speed, time}（与后端 TrackPointInput 对齐）
+      final track = summary.gpsPoints.map((p) {
+        return {
+          'lat': p.latLng.latitude,
+          'lng': p.latLng.longitude,
+          'ele': p.altitude,
+          'speed': p.speed,
+          'time': p.timestamp.toIso8601String(),
+        };
+      }).toList();
 
       final res = await ApiClient.instance.dio.post('/activities', data: {
         'type': summary.type.name,
@@ -108,16 +114,22 @@ class ActivityDetailNotifier
     try {
       final res = await ApiClient.instance.dio.get('/activities/$activityId');
       final data = res.data as Map<String, dynamic>;
-      // 后端返回 track: [[lng, lat], ...]，转回 GpsPoint 列表
-      final trackCoords = (data['track'] as List?) ?? [];
-      final points = trackCoords.map((coord) {
-        final c = coord as List;
+      // 后端返回多维点 track: [{seq, lat, lng, ele, speed, recorded_at}, ...]
+      final trackPoints = (data['track'] as List?) ?? [];
+      final points = trackPoints.map((raw) {
+        final p = raw as Map<String, dynamic>;
+        final startTime = data['start_time'] as String? ?? '';
         return GpsPoint(
-          latLng: LatLng(c[1] as double, c[0] as double), // [lng, lat] → LatLng(lat, lng)
-          altitude: 0,
-          speed: 0,
+          latLng: LatLng(
+            (p['lat'] as num).toDouble(),
+            (p['lng'] as num).toDouble(),
+          ),
+          altitude: (p['ele'] as num?)?.toDouble() ?? 0,
+          speed: (p['speed'] as num?)?.toDouble() ?? 0,
           accuracy: 0,
-          timestamp: DateTime.parse(data['start_time'] as String),
+          timestamp: p['recorded_at'] != null
+              ? DateTime.parse(p['recorded_at'] as String)
+              : (startTime.isNotEmpty ? DateTime.parse(startTime) : DateTime.now()),
         );
       }).toList();
 
@@ -130,6 +142,20 @@ class ActivityDetailNotifier
     } catch (e) {
       debugPrint('加载活动详情失败: $e');
       state = const ActivityDetailState(loading: false);
+    }
+  }
+
+  /// 下载活动的 GPX 文件（返回 XML 字符串，由调用方决定分享/保存）。
+  Future<String?> downloadGpx(String activityId) async {
+    try {
+      final res = await ApiClient.instance.dio.get(
+        '/activities/$activityId/export.gpx',
+        options: Options(responseType: ResponseType.plain),
+      );
+      return res.data as String;
+    } catch (e) {
+      debugPrint('下载 GPX 失败: $e');
+      return null;
     }
   }
 }

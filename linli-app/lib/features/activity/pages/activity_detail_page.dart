@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../shared/widgets/activity_map.dart';
 import '../providers/activity_provider.dart';
 
@@ -8,12 +11,53 @@ class ActivityDetailPage extends ConsumerWidget {
 
   const ActivityDetailPage({super.key, required this.activityId});
 
+  /// 导出 GPX：下载 XML → 写临时文件 → 调系统分享。
+  Future<void> _exportGpx(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('正在生成 GPX...')),
+    );
+    final xml = await ref
+        .read(activityDetailProvider(activityId).notifier)
+        .downloadGpx(activityId);
+    if (xml == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('导出失败，请重试')),
+      );
+      return;
+    }
+    try {
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/linli-$activityId.gpx');
+      await file.writeAsString(xml);
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '林立运动轨迹 $activityId',
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('分享失败: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final detail = ref.watch(activityDetailProvider(activityId));
 
     return Scaffold(
-      appBar: AppBar(),
+      appBar: AppBar(
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download_outlined),
+            tooltip: '导出 GPX',
+            // 详情加载完才允许导出
+            onPressed: detail.activity == null
+                ? null
+                : () => _exportGpx(context, ref),
+          ),
+        ],
+      ),
       body: detail.loading
           ? const Center(child: CircularProgressIndicator())
           : detail.activity == null
@@ -26,6 +70,7 @@ class ActivityDetailPage extends ConsumerWidget {
     final a = detail.activity!;
     final distance = (a['distance_m'] as num?)?.toInt() ?? 0;
     final duration = (a['duration_s'] as num?)?.toInt() ?? 0;
+    final movingTime = (a['moving_time_s'] as num?)?.toInt() ?? 0;
     final avgPace = (a['avg_pace_s_per_km'] as num?)?.toInt() ?? 0;
     final elevGain = (a['elevation_gain_m'] as num?)?.toDouble() ?? 0;
     final elevLoss = (a['elevation_loss_m'] as num?)?.toDouble() ?? 0;
@@ -87,10 +132,19 @@ class ActivityDetailPage extends ConsumerWidget {
           const SizedBox(height: 8),
           _DetailRow(label: '平均速度', value: '${avgSpeed.toStringAsFixed(1)} km/h'),
           _DetailRow(label: '最高速度', value: '${maxSpeed.toStringAsFixed(1)} km/h'),
+          _DetailRow(label: '移动时间', value: _fmtDuration(movingTime)),
           _DetailRow(label: '累计下降', value: '${elevLoss.toStringAsFixed(0)} m'),
           _DetailRow(label: '消耗热量', value: '$calories kcal'),
           _DetailRow(
               label: '轨迹点数', value: '${detail.points.length}个'),
+          const SizedBox(height: 16),
+          // 导出提示（实际按钮在 AppBar）
+          Center(
+            child: Text(
+              '点击右上角图标可导出 GPX 文件',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12),
+            ),
+          ),
         ],
       ),
     );
