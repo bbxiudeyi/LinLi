@@ -34,7 +34,7 @@ pub async fn register(
         r#"INSERT INTO users (email, password_hash, nickname)
            VALUES ($1, $2, $3)
            RETURNING id, email, password_hash, nickname, avatar_url, bio,
-                     gender, birthday, weight_kg, created_at, updated_at"#,
+                     gender, birthday, weight_kg, token_version, created_at, updated_at"#,
     )
     .bind(&req.email)
     .bind(&password_hash)
@@ -42,7 +42,7 @@ pub async fn register(
     .fetch_one(&state.db)
     .await?;
 
-    let token = sign_jwt(user.id, &state.config.jwt_secret, state.config.jwt_expires_hours)?;
+    let token = sign_jwt(user.id, user.token_version, &state.config.jwt_secret, state.config.jwt_expires_hours)?;
     Ok(Json(AuthResponse {
         token,
         user: user.into(),
@@ -62,7 +62,7 @@ pub async fn login(
 
     let user: Option<User> = sqlx::query_as(
         r#"SELECT id, email, password_hash, nickname, avatar_url, bio,
-                  gender, birthday, weight_kg, created_at, updated_at
+                  gender, birthday, weight_kg, token_version, created_at, updated_at
            FROM users WHERE email = $1"#,
     )
     .bind(&req.email)
@@ -74,11 +74,25 @@ pub async fn login(
         return Err(AppError::InvalidCredentials);
     }
 
-    let token = sign_jwt(user.id, &state.config.jwt_secret, state.config.jwt_expires_hours)?;
+    let token = sign_jwt(user.id, user.token_version, &state.config.jwt_secret, state.config.jwt_expires_hours)?;
     Ok(Json(AuthResponse {
         token,
         user: user.into(),
     }))
+}
+
+/// POST /api/v1/auth/logout
+///
+/// 撤销当前 token：token_version + 1，使所有旧 token 立即失效。
+pub async fn logout(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    sqlx::query("UPDATE users SET token_version = token_version + 1 WHERE id = $1")
+        .bind(user_id)
+        .execute(&state.db)
+        .await?;
+    Ok(Json(serde_json::json!({ "logged_out": true })))
 }
 
 /// GET /api/v1/auth/me
@@ -90,7 +104,7 @@ pub async fn me(
 ) -> AppResult<Json<UserProfile>> {
     let user: User = sqlx::query_as(
         r#"SELECT id, email, password_hash, nickname, avatar_url, bio,
-                  gender, birthday, weight_kg, created_at, updated_at
+                  gender, birthday, weight_kg, token_version, created_at, updated_at
            FROM users WHERE id = $1"#,
     )
     .bind(user_id)

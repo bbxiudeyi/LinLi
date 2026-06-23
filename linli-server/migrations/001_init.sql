@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   gender TEXT CHECK (gender IN ('male', 'female')),
   birthday DATE,
   weight_kg DECIMAL(5,2),
+  token_version INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

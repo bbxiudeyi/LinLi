@@ -39,14 +39,29 @@ pub async fn update_my_profile(
         }
     }
 
+    // 如果改密码：先哈希，且 token_version+1（让其他设备掉线）
+    let (new_pwd_hash, bump_version) = if let Some(ref pwd) = req.password {
+        if pwd.len() < 8 {
+            return Err(AppError::BadRequest("密码至少 8 位".into()));
+        }
+        let hash = crate::auth::hash_password(pwd)?;
+        (Some(hash), true)
+    } else {
+        (None, false)
+    };
+
     let user: UserProfile = sqlx::query_as(
         r#"UPDATE users SET
              nickname = COALESCE($1, nickname),
              bio = $2,
              gender = $3,
              birthday = $4,
-             weight_kg = $5
-           WHERE id = $6
+             weight_kg = $5,
+             password_hash = COALESCE($6, password_hash),
+             token_version = CASE WHEN $7::boolean
+                                  THEN token_version + 1
+                                  ELSE token_version END
+           WHERE id = $8
            RETURNING id, email, nickname, avatar_url, bio, gender, birthday,
                      weight_kg, created_at"#,
     )
@@ -55,9 +70,18 @@ pub async fn update_my_profile(
     .bind(req.gender.as_deref())
     .bind(req.birthday)
     .bind(req.weight_kg)
+    .bind(new_pwd_hash)
+    .bind(bump_version)
     .bind(user_id)
     .fetch_one(&state.db)
     .await?;
+
+    let msg = if bump_version {
+        "资料已更新，密码已修改，其他设备需重新登录"
+    } else {
+        "资料已更新"
+    };
+    tracing::info!("用户 {user_id} 更新资料: {msg}");
     Ok(Json(user))
 }
 

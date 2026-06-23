@@ -6,18 +6,20 @@ use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Claims {
-    pub sub: Uuid, // user id
-    pub exp: usize, // 过期时间戳（秒）
-    pub iat: usize, // 签发时间
+    pub sub: Uuid,      // user id
+    pub exp: usize,     // 过期时间戳（秒）
+    pub iat: usize,     // 签发时间
+    pub ver: i64,       // token 版本号（用于撤销：登出/改密码时 +1，旧 token 失效）
 }
 
-/// 签发 JWT。
-pub fn sign_jwt(user_id: Uuid, secret: &str, expires_hours: i64) -> AppResult<String> {
+/// 签发 JWT。需传入当前 token_version，写入 claims.ver。
+pub fn sign_jwt(user_id: Uuid, token_version: i32, secret: &str, expires_hours: i64) -> AppResult<String> {
     let now = Utc::now();
     let claims = Claims {
         sub: user_id,
         iat: now.timestamp() as usize,
         exp: (now + Duration::hours(expires_hours)).timestamp() as usize,
+        ver: token_version as i64,
     };
     let token = encode(
         &Header::default(),
@@ -110,12 +112,9 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Response {
     // 从 request extensions 取 AppState（Extension layer 提供的）
-    let jwt_secret = req
-        .extensions()
-        .get::<crate::AppState>()
-        .map(|s| s.config.jwt_secret.clone());
+    let state = req.extensions().get::<crate::AppState>().cloned();
 
-    if let Some(secret) = jwt_secret {
+    if let Some(state) = state {
         let auth_header = req
             .headers()
             .get(axum::http::header::AUTHORIZATION)
@@ -123,8 +122,24 @@ pub async fn auth_middleware(
             .and_then(|s| s.strip_prefix("Bearer "));
 
         if let Some(token) = auth_header {
-            if let Ok(claims) = verify_jwt(token, &secret) {
-                req.extensions_mut().insert(claims);
+            if let Ok(claims) = verify_jwt(token, &state.config.jwt_secret) {
+                // ★ 校验 token_version：查 DB 当前版本，不匹配则视为已撤销
+                let db_ver: Option<(i32,)> = sqlx::query_as(
+                    "SELECT token_version FROM users WHERE id = $1",
+                )
+                .bind(claims.sub)
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten();
+
+                if let Some((db_ver,)) = db_ver {
+                    if claims.ver == db_ver as i64 {
+                        // 版本匹配，放行
+                        req.extensions_mut().insert(claims);
+                    }
+                    // 版本不匹配：不塞 claims → 后续 AuthUser 提取器会返回 401
+                }
             }
         }
     }

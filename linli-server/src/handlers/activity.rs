@@ -82,15 +82,36 @@ pub async fn create_activity(
     Json(req): Json<CreateActivityRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     // 校验运动类型
-    let valid_types = ["run", "ride", "hike", "walk"];
-    if !valid_types.contains(&req.sport_type.as_str()) {
+    const VALID_TYPES: [&str; 4] = ["run", "ride", "hike", "walk"];
+    if !VALID_TYPES.contains(&req.sport_type.as_str()) {
         return Err(AppError::BadRequest(format!(
             "type 必须是 {:?} 之一",
-            valid_types
+            VALID_TYPES
         )));
     }
+    // ★ S2 安全限制：轨迹点数、距离、时长的合理上限
+    const MAX_TRACK_POINTS: usize = 50_000; // 单次最多 5 万点（约马拉松级）
+    const MAX_DISTANCE_M: i32 = 1_000_000; // 1000 km
+    const MAX_DURATION_S: i32 = 24 * 3600; // 24 小时
     if req.track.len() < 2 {
         return Err(AppError::BadRequest("track 至少 2 个点".into()));
+    }
+    if req.track.len() > MAX_TRACK_POINTS {
+        return Err(AppError::BadRequest(format!(
+            "轨迹点数 {}/{} 超过上限",
+            req.track.len(),
+            MAX_TRACK_POINTS
+        )));
+    }
+    if req.distance_m < 0 || req.distance_m > MAX_DISTANCE_M {
+        return Err(AppError::BadRequest(format!(
+            "distance_m 必须在 0..{MAX_DISTANCE_M} 之间"
+        )));
+    }
+    if req.duration_s < 0 || req.duration_s > MAX_DURATION_S {
+        return Err(AppError::BadRequest(format!(
+            "duration_s 必须在 0..{MAX_DURATION_S} 之间"
+        )));
     }
 
     // 把 [[lng, lat], ...] 拼成 PostGIS 的 WKT / 直接用 ST_GeomFromGeoJSON

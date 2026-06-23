@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
         // 认证（公开）
         .route("/api/v1/auth/register", post(handlers::auth::register))
         .route("/api/v1/auth/login", post(handlers::auth::login))
+        .route("/api/v1/auth/logout", post(handlers::auth::logout))
         .route("/api/v1/auth/me", get(handlers::auth::me))
         // 用户
         .route("/api/v1/users/:id", get(handlers::social::get_user_profile))
@@ -110,12 +111,20 @@ async fn connect_with_retry(url: &str) -> anyhow::Result<sqlx::PgPool> {
     anyhow::bail!("数据库连接 15 次重试均失败")
 }
 
-/// 构建 CORS 层。
+/// 构建 CORS 层。启动时校验 + 打印日志（防配错）。
 fn build_cors(origins: &[String]) -> CorsLayer {
+    // ★ S3 安全：通配 * 配合 credentials 会泄露，拒绝启动
+    if origins.iter().any(|o| o.trim() == "*") {
+        panic!(
+            "CORS_ORIGINS 不能是 '*'（开了 allow_credentials 会泄露凭据）。\
+             请改成具体域名，如 https://www.bbtech.com"
+        );
+    }
     let parsed: Vec<_> = origins
         .iter()
         .filter_map(|o| o.parse().ok())
         .collect();
+    tracing::info!("CORS 允许的源: {:?}", parsed);
     CorsLayer::new()
         .allow_origin(parsed)
         .allow_methods([

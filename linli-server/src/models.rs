@@ -17,6 +17,8 @@ pub struct User {
     pub gender: Option<String>,
     pub birthday: Option<NaiveDate>,
     pub weight_kg: Option<f64>,
+    #[serde(skip_serializing)]
+    pub token_version: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -52,6 +54,7 @@ pub struct UpdateUserRequest {
     pub gender: Option<String>,
     pub birthday: Option<NaiveDate>,
     pub weight_kg: Option<f64>,
+    pub password: Option<String>, // 改密码时传入，会同时 token_version+1 让其他设备掉线
 }
 
 /// 用户公开信息（不含密码）。
