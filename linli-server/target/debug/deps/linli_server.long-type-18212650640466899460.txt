@@ -1,2 +1,0 @@
-(Uuid, Uuid, std::string::String, i32, i32, i32, i32, f64, f64, f64, f64, i32, DateTime<Utc>, std::option::Option<DateTime<Utc>>, std::option::Option<std::string::String>, std::option::Option<std::string::String>, bool, std::option::Option<std::string::String>)
-for<'r> (Uuid, Uuid, std::string::String, i32, i32, i32, i32, f64, f64, f64, f64, i32, DateTime<Utc>, std::option::Option<DateTime<Utc>>, std::option::Option<std::string::String>, std::option::Option<std::string::String>, bool, std::option::Option<std::string::String>): FromRow<'r, PgRow>
