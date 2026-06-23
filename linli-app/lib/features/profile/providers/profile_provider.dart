@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/database/local_db.dart';
+import '../../../core/network/api_client.dart';
 import '../../auth/providers/auth_provider.dart';
 
 class ProfileState {
@@ -30,7 +30,7 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
   final Ref _ref;
   ProfileNotifier(this._ref) : super(const ProfileState());
 
-  /// 加载当前登录用户的资料 + 最近活动（本地数据库）。
+  /// 从云端加载当前用户资料 + 最近活动。
   Future<void> loadProfile() async {
     final user = _ref.read(authProvider).user;
     if (user == null) {
@@ -40,11 +40,17 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
 
     state = state.copyWith(loading: true);
     try {
-      final profile = await LocalDb.getUser(user.id);
-      final activities = await LocalDb.queryActivities(limit: 10);
+      // 并行请求：用户资料 + 活动列表
+      final profileRes = await ApiClient.instance.dio.get('/auth/me');
+      final activitiesRes = await ApiClient.instance.dio.get(
+        '/activities',
+        queryParameters: {'limit': 10},
+      );
+
       state = ProfileState(
-        profile: profile,
-        recentActivities: activities,
+        profile: profileRes.data as Map<String, dynamic>,
+        recentActivities:
+            (activitiesRes.data as List).cast<Map<String, dynamic>>(),
         loading: false,
       );
     } catch (_) {
@@ -52,19 +58,12 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
     }
   }
 
-  /// 更新当前用户资料，成功后刷新本地 state。
+  /// 更新资料到云端，成功后刷新本地 state。
   Future<bool> updateProfile(Map<String, dynamic> fields) async {
-    final user = _ref.read(authProvider).user;
-    if (user == null) return false;
-
     try {
-      await LocalDb.updateUser(user.id, fields);
-      // 合并到现有 profile，避免整页重新加载
-      final merged = <String, dynamic>{
-        ...?state.profile,
-        ...fields,
-      };
-      state = state.copyWith(profile: merged);
+      final res = await ApiClient.instance.dio.patch('/users/me', data: fields);
+      // 用服务器返回的完整 profile 覆盖本地
+      state = state.copyWith(profile: res.data as Map<String, dynamic>);
       return true;
     } catch (_) {
       return false;

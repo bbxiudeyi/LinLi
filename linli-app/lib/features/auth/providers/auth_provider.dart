@@ -129,8 +129,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  /// 退出登录（清 token，清状态）。
+  /// 退出登录：通知后端撤销 token + 清本地状态。
   Future<void> signOut() async {
+    try {
+      // 通知后端撤销 token（token_version + 1）
+      await ApiClient.instance.dio.post('/auth/logout');
+    } catch (_) {
+      // 网络失败不影响登出
+    }
     await ApiClient.instance.clearToken();
     state = const AuthState(status: AuthStatus.unauthenticated);
   }

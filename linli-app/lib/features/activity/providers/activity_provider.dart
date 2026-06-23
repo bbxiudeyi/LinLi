@@ -1,6 +1,8 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
-import '../../../core/database/local_db.dart';
+import '../../../core/network/api_client.dart';
 import '../models/activity_models.dart';
 
 class ActivityListState {
@@ -39,22 +41,28 @@ class ActivityDetailState {
 class ActivityListNotifier extends StateNotifier<ActivityListState> {
   ActivityListNotifier() : super(const ActivityListState());
 
-  /// 加载本地所有活动（按开始时间降序）。
+  /// 从云端加载我的活动列表（按开始时间降序）。
   Future<void> loadMyActivities() async {
     state = state.copyWith(loading: true);
     try {
-      final data = await LocalDb.queryActivities(limit: 50);
-      state = state.copyWith(activities: data, loading: false);
+      final res = await ApiClient.instance.dio.get('/activities');
+      final list = (res.data as List).cast<Map<String, dynamic>>();
+      state = ActivityListState(activities: list, loading: false);
     } catch (_) {
       state = state.copyWith(loading: false);
     }
   }
 
-  /// 保存运动活动：写 activities 行 + 批量写轨迹点。
-  /// **修复原 Supabase 版轨迹点丢失的问题**。
+  /// 上传运动活动到云端。
+  /// 把 GpsPoint[] 转成后端要求的 [[lng, lat], ...] GeoJSON 坐标格式。
   Future<String?> saveActivity(ActivitySummary summary) async {
     try {
-      final id = await LocalDb.insertActivity({
+      // 轨迹点转 [[lng, lat], ...]（GeoJSON LineString 坐标格式）
+      final track = summary.gpsPoints
+          .map((p) => [p.latLng.longitude, p.latLng.latitude])
+          .toList();
+
+      final res = await ApiClient.instance.dio.post('/activities', data: {
         'type': summary.type.name,
         'distance_m': summary.distanceMeters,
         'duration_s': summary.durationSeconds,
@@ -65,28 +73,17 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
         'elevation_gain_m': summary.elevationGain,
         'elevation_loss_m': summary.elevationLoss,
         'calories': summary.calories,
-        'start_time': summary.startTime.toIso8601String(),
-        'end_time': summary.endTime.toIso8601String(),
+        'start_time': summary.startTime.toUtc().toIso8601String(),
+        'end_time': summary.endTime.toUtc().toIso8601String(),
+        'track': track,
       });
-
-      // 轨迹点入库（核心修复：原版直接丢弃了 summary.gpsPoints）
-      final points = <Map<String, dynamic>>[];
-      for (var i = 0; i < summary.gpsPoints.length; i++) {
-        final p = summary.gpsPoints[i];
-        points.add({
-          'lat': p.latLng.latitude,
-          'lng': p.latLng.longitude,
-          'altitude': p.altitude,
-          'speed': p.speed,
-          'accuracy': p.accuracy,
-          'timestamp': p.timestamp.toIso8601String(),
-          'seq': i,
-        });
-      }
-      await LocalDb.insertPoints(id, points);
-
-      return id;
-    } catch (_) {
+      return res.data['id'] as String?;
+    } on DioException catch (e) {
+      // 上传失败：打印错误便于排查（生产可改为本地缓存重试）
+      debugPrint('上传活动失败: ${e.response?.data}');
+      return null;
+    } catch (e) {
+      debugPrint('上传活动异常: $e');
       return null;
     }
   }
@@ -97,8 +94,7 @@ final activityListProvider =
   (ref) => ActivityListNotifier(),
 );
 
-/// 按活动 ID 拉取详情（活动行 + 轨迹点）。
-/// 用 StateNotifierProvider.family 兼容 riverpod 2.6。
+/// 按活动 ID 从云端拉取详情（活动行 + 轨迹点）。
 class ActivityDetailNotifier
     extends FamilyNotifier<ActivityDetailState, String> {
   @override
@@ -109,19 +105,27 @@ class ActivityDetailNotifier
 
   Future<void> _load(String activityId) async {
     try {
-      final activity = await LocalDb.getActivity(activityId);
-      final pointRows = await LocalDb.getPoints(activityId);
-      final points = pointRows.map((row) {
+      final res = await ApiClient.instance.dio.get('/activities/$activityId');
+      final data = res.data as Map<String, dynamic>;
+      // 后端返回 track: [[lng, lat], ...]，转回 GpsPoint 列表
+      final trackCoords = (data['track'] as List?) ?? [];
+      final points = trackCoords.map((coord) {
+        final c = coord as List;
         return GpsPoint(
-          latLng: LatLng(row['lat'] as double, row['lng'] as double),
-          altitude: (row['altitude'] as num?)?.toDouble() ?? 0,
-          speed: (row['speed'] as num?)?.toDouble() ?? 0,
-          accuracy: (row['accuracy'] as num?)?.toDouble() ?? 0,
-          timestamp: DateTime.parse(row['timestamp'] as String),
+          latLng: LatLng(c[1] as double, c[0] as double), // [lng, lat] → LatLng(lat, lng)
+          altitude: 0,
+          speed: 0,
+          accuracy: 0,
+          timestamp: DateTime.parse(data['start_time'] as String),
         );
       }).toList();
+
+      // 移除 track 字段（避免 activity map 太大）
+      final activityMap = Map<String, dynamic>.from(data);
+      activityMap.remove('track');
+
       state = ActivityDetailState(
-          activity: activity, points: points, loading: false);
+          activity: activityMap, points: points, loading: false);
     } catch (_) {
       state = const ActivityDetailState(loading: false);
     }

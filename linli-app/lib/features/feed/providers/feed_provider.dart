@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/database/local_db.dart';
+import '../../../core/network/api_client.dart';
 
 class FeedState {
   final List<Map<String, dynamic>> activities;
@@ -26,21 +26,23 @@ class FeedState {
   }
 }
 
-/// 本地 Feed：单用户模式，只显示自己的活动（无关注/他人）。
-/// 点赞/取消点赞针对自己的活动。
+/// 云端 Feed：关注流（自己 + 关注的人的活动）。
 class FeedNotifier extends StateNotifier<FeedState> {
   FeedNotifier() : super(const FeedState());
 
   Future<void> loadFeed() async {
     state = state.copyWith(loading: true);
     try {
-      final data = await LocalDb.queryActivities(limit: 30);
+      final res = await ApiClient.instance.dio.get('/feed');
+      final data = (res.data as List).cast<Map<String, dynamic>>();
 
-      // 查每个活动的点赞状态（单用户：给自己点赞）
+      // 后端返回了 has_kudo 字段，直接用它构建 kudoMap
       final kudoMap = <String, bool>{};
       for (final a in data) {
-        final id = a['id'] as String;
-        kudoMap[id] = await LocalDb.hasKudo(id);
+        final id = a['id'] as String?;
+        if (id != null) {
+          kudoMap[id] = a['has_kudo'] as bool? ?? false;
+        }
       }
 
       state = FeedState(activities: data, kudoMap: kudoMap, loading: false);
@@ -49,17 +51,21 @@ class FeedNotifier extends StateNotifier<FeedState> {
     }
   }
 
-  /// 切换某活动的点赞状态。
+  /// 切换某活动的点赞状态（调云端 API）。
   Future<void> toggleKudo(String activityId) async {
-    final has = await LocalDb.hasKudo(activityId);
-    if (has) {
-      await LocalDb.removeKudo(activityId);
-    } else {
-      await LocalDb.addKudo(activityId);
+    final has = state.kudoMap[activityId] ?? false;
+    try {
+      if (has) {
+        await ApiClient.instance.dio.delete('/activities/$activityId/kudos');
+      } else {
+        await ApiClient.instance.dio.post('/activities/$activityId/kudos');
+      }
+      final newMap = Map<String, bool>.from(state.kudoMap);
+      newMap[activityId] = !has;
+      state = state.copyWith(kudoMap: newMap);
+    } catch (_) {
+      // 网络失败，状态不变
     }
-    final newMap = Map<String, bool>.from(state.kudoMap);
-    newMap[activityId] = !has;
-    state = state.copyWith(kudoMap: newMap);
   }
 }
 
