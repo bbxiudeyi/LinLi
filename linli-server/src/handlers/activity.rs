@@ -64,6 +64,35 @@ pub async fn list_my_activities(
     Ok(Json(rows))
 }
 
+/// GET /api/v1/activities/stats/daily
+///
+/// 返回当前用户最近一年的每日活动数，供"活跃日历"热力图展示。
+/// 返回格式：`[{ "date": "2026-06-01", "count": 3 }, ...]`（只含有活动的日期）。
+pub async fn daily_stats(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> AppResult<Json<Vec<serde_json::Value>>> {
+    let rows: Vec<(chrono::NaiveDate, i64)> = sqlx::query_as(
+        r#"SELECT (start_time AT TIME ZONE 'UTC')::date AS d, COUNT(*) AS c
+           FROM activities
+           WHERE user_id = $1
+             AND start_time > now() - INTERVAL '365 days'
+           GROUP BY d
+           ORDER BY d"#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let out: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(d, c)| {
+            serde_json::json!({ "date": d.format("%Y-%m-%d").to_string(), "count": c })
+        })
+        .collect();
+    Ok(Json(out))
+}
+
 /// POST /api/v1/activities
 ///
 /// 上传新活动。track 是 `[[lng, lat], ...]` 数组。

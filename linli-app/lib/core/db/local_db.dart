@@ -182,6 +182,17 @@ class LocalDb {
     );
   }
 
+  /// 统计本地活动总数（用于 Profile 统计展示）。
+  Future<int> countActivities() async {
+    final rows = await _database.rawQuery('SELECT COUNT(*) AS c FROM activities');
+    return Sqflite.firstIntValue(rows) ?? 0;
+  }
+
+  /// 执行原始 SQL 查询（供统计聚合等场景使用）。
+  Future<List<Map<String, dynamic>>> rawQuery(String sql, [List<Object?>? args]) {
+    return _database.rawQuery(sql, args);
+  }
+
   /// 读取单条活动。
   Future<Map<String, dynamic>?> getActivity(String id) async {
     final rows = await _database.query(

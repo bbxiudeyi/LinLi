@@ -2,15 +2,17 @@ import 'package:go_router/go_router.dart';
 import '../core/network/api_client.dart';
 import '../features/auth/pages/login_page.dart';
 import '../features/auth/pages/register_page.dart';
+import '../features/club/pages/club_list_page.dart';
 import '../features/feed/pages/feed_page.dart';
 import '../features/activity/pages/activity_record_page.dart';
 import '../features/profile/pages/profile_page.dart';
 import '../features/profile/pages/edit_profile_page.dart';
+import '../features/profile/pages/user_profile_page.dart';
 import '../features/activity/pages/activity_detail_page.dart';
 import 'main_shell.dart';
 
 /// 需要登录才能访问的路径前缀。
-const _protectedPrefixes = ['/feed', '/record', '/profile', '/activity'];
+const _protectedPrefixes = ['/feed', '/record', '/clubs', '/profile', '/activity', '/user'];
 
 final router = GoRouter(
   initialLocation: '/feed',
@@ -60,6 +62,12 @@ final router = GoRouter(
           ),
         ),
         GoRoute(
+          path: '/clubs',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: ClubListPage(),
+          ),
+        ),
+        GoRoute(
           path: '/profile',
           pageBuilder: (context, state) => const NoTransitionPage(
             child: ProfilePage(),
@@ -72,6 +80,13 @@ final router = GoRouter(
       builder: (context, state) {
         final id = state.pathParameters['id']!;
         return ActivityDetailPage(activityId: id);
+      },
+    ),
+    GoRoute(
+      path: '/user/:id',
+      builder: (context, state) {
+        final id = state.pathParameters['id']!;
+        return UserProfilePage(userId: id);
       },
     ),
     GoRoute(

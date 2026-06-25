@@ -8,22 +8,26 @@ import '../../auth/providers/auth_provider.dart';
 class ProfileState {
   final Map<String, dynamic>? profile;
   final List<Map<String, dynamic>> recentActivities;
+  final int activityCount; // 本地活动总数（用于统计展示）
   final bool loading;
 
   const ProfileState({
     this.profile,
     this.recentActivities = const [],
+    this.activityCount = 0,
     this.loading = false,
   });
 
   ProfileState copyWith({
     Map<String, dynamic>? profile,
     List<Map<String, dynamic>>? recentActivities,
+    int? activityCount,
     bool? loading,
   }) {
     return ProfileState(
       profile: profile ?? this.profile,
       recentActivities: recentActivities ?? this.recentActivities,
+      activityCount: activityCount ?? this.activityCount,
       loading: loading ?? this.loading,
     );
   }
@@ -46,11 +50,13 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
     try {
       final cachedProfile = await LocalDb.instance.getMyProfile();
       final localActivities = await LocalDb.instance.listActivities(limit: 10);
+      final total = await LocalDb.instance.countActivities();
       if (!mounted) return;
       if (cachedProfile != null || localActivities.isNotEmpty) {
         state = ProfileState(
           profile: cachedProfile,
           recentActivities: localActivities,
+          activityCount: total,
           loading: false,
         );
       } else {
@@ -71,11 +77,13 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
 
       // 重新读本地活动（合并云端后），保证未同步的也显示
       final activities = await LocalDb.instance.listActivities(limit: 10);
+      final total = await LocalDb.instance.countActivities();
 
       if (!mounted) return;
       state = ProfileState(
         profile: profile,
         recentActivities: activities,
+        activityCount: total,
         loading: false,
       );
     } catch (e) {

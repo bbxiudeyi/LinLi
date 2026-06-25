@@ -67,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         )
         // 活动
         .route("/api/v1/activities", get(handlers::activity::list_my_activities))
+        .route("/api/v1/activities/stats/daily", get(handlers::activity::daily_stats))
         .route("/api/v1/activities", post(handlers::activity::create_activity))
         .route("/api/v1/activities/:id", get(handlers::activity::get_activity))
         .route("/api/v1/activities/:id", delete(handlers::activity::delete_activity))

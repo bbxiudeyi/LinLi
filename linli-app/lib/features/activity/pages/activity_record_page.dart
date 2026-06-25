@@ -292,6 +292,19 @@ class _SaveView extends StatefulWidget {
 
 class _SaveViewState extends State<_SaveView> {
   bool _saving = false;
+  late final TextEditingController _titleController;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(); // 不预填，用户自己输入
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
 
   Future<void> _save() async {
     if (_saving) return;
@@ -310,9 +323,13 @@ class _SaveViewState extends State<_SaveView> {
       return;
     }
 
+    // 把用户输入的活动名称填进 summary
+    final title = _titleController.text.trim();
+    final named = title.isEmpty ? summary : summary.copyWith(title: title);
+
     final id = await widget.ref
         .read(activityListProvider.notifier)
-        .saveActivity(summary);
+        .saveActivity(named);
 
     widget.ref.read(gpsTrackerProvider.notifier).reset();
 
@@ -349,6 +366,20 @@ class _SaveViewState extends State<_SaveView> {
                     style: const TextStyle(
                         fontSize: 18, fontWeight: FontWeight.bold)),
               ],
+            ),
+            const SizedBox(height: 16),
+            // 活动名称输入框（地图上方，不预填，可空）
+            TextField(
+              controller: _titleController,
+              decoration: InputDecoration(
+                labelText: '活动名称',
+                hintText: '给这次活动起个名字（可选）',
+                prefixIcon: const Icon(Icons.edit_outlined, size: 20),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             SizedBox(

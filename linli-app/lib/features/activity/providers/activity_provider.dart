@@ -108,6 +108,7 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
       final res = await ApiClient.instance.dio.post('/activities', data: {
         'id': activityId, // ★ 客户端生成，本地 ID = 云端 ID
         'type': summary.type.name,
+        'title': summary.title,
         'distance_m': summary.distanceMeters,
         'duration_s': summary.durationSeconds,
         'moving_time_s': summary.movingTimeSeconds,
@@ -121,6 +122,11 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
         'end_time': summary.endTime.toUtc().toIso8601String(),
         'track': track,
       });
+      // 写本地活动行的 title（录制时本地行无 title，这里补上）
+      if (summary.title != null && summary.title!.isNotEmpty) {
+        await LocalDb.instance.updateActivityStats(
+            activityId, {'title': summary.title});
+      }
       final returnedId = res.data['id'] as String?;
       // 上传成功，标记已同步
       await LocalDb.instance.markSynced(activityId);
@@ -165,6 +171,7 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
         await ApiClient.instance.dio.post('/activities', data: {
           'id': activityId,
           'type': row['type'],
+          'title': row['title'],
           'distance_m': row['distance_m'],
           'duration_s': row['duration_s'],
           'moving_time_s': row['moving_time_s'],

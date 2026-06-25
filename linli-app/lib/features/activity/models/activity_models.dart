@@ -49,6 +49,7 @@ class GpsPoint {
 class ActivitySummary {
   final SportType type;
   final String? localActivityId; // 本地/云端共用的活动 UUID（离线录制时生成）
+  final String? title; // 活动名称（用户在保存页输入）
   final int distanceMeters;
   final int durationSeconds;
   final int movingTimeSeconds;
@@ -65,6 +66,7 @@ class ActivitySummary {
   const ActivitySummary({
     required this.type,
     this.localActivityId,
+    this.title,
     required this.distanceMeters,
     required this.durationSeconds,
     required this.movingTimeSeconds,
@@ -78,6 +80,27 @@ class ActivitySummary {
     required this.endTime,
     required this.gpsPoints,
   });
+
+  /// 拷贝并覆盖部分字段（用于保存页填入 title）。
+  ActivitySummary copyWith({String? title}) {
+    return ActivitySummary(
+      type: type,
+      localActivityId: localActivityId,
+      title: title ?? this.title,
+      distanceMeters: distanceMeters,
+      durationSeconds: durationSeconds,
+      movingTimeSeconds: movingTimeSeconds,
+      avgPaceSecondsPerKm: avgPaceSecondsPerKm,
+      avgSpeedKmh: avgSpeedKmh,
+      maxSpeedKmh: maxSpeedKmh,
+      elevationGain: elevationGain,
+      elevationLoss: elevationLoss,
+      calories: calories,
+      startTime: startTime,
+      endTime: endTime,
+      gpsPoints: gpsPoints,
+    );
+  }
 
   String get distanceDisplay {
     if (distanceMeters >= 1000) {

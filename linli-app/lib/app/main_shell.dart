@@ -9,6 +9,7 @@ class MainShell extends StatelessWidget {
   static const _tabs = [
     _TabConfig('/feed', Icons.home_outlined, Icons.home, '动态'),
     _TabConfig('/record', Icons.play_circle_outline, Icons.play_circle, '记录'),
+    _TabConfig('/clubs', Icons.groups_2_outlined, Icons.groups_2, '俱乐部'),
     _TabConfig('/profile', Icons.person_outline, Icons.person, '我的'),
   ];
 

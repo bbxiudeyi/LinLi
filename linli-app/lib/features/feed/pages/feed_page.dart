@@ -3,11 +3,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/feed_provider.dart';
 
-class FeedPage extends ConsumerWidget {
+class FeedPage extends ConsumerStatefulWidget {
   const FeedPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<FeedPage> createState() => _FeedPageState();
+}
+
+class _FeedPageState extends ConsumerState<FeedPage> {
+  @override
+  void initState() {
+    super.initState();
+    // 首次进入自动加载动态流（之前只在下拉刷新时加载）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(feedProvider.notifier).loadFeed();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final feed = ref.watch(feedProvider);
 
     return Scaffold(
@@ -111,36 +125,42 @@ class _ActivityCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // User row（扁平 nickname / avatar_url）
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundImage: (activity['avatar_url'] as String?) != null
-                        ? NetworkImage(activity['avatar_url'] as String)
-                        : null,
-                    child: (activity['avatar_url'] as String?) == null
-                        ? const Icon(Icons.person, size: 20)
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          nickname,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        Text(
-                          '$sportIcon $sportLabel · ${_formatTime(activity['start_time'])}',
-                          style: TextStyle(
+              // User row（扁平 nickname / avatar_url）—— 点击跳该用户资料页
+              GestureDetector(
+                onTap: () {
+                  final userId = activity['user_id'] as String?;
+                  if (userId != null) context.push('/user/$userId');
+                },
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundImage: (activity['avatar_url'] as String?) != null
+                          ? NetworkImage(activity['avatar_url'] as String)
+                          : null,
+                      child: (activity['avatar_url'] as String?) == null
+                          ? const Icon(Icons.person, size: 20)
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            nickname,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            '$sportIcon $sportLabel · ${_formatTime(activity['start_time'])}',
+                            style: TextStyle(
                               color: Colors.grey[600], fontSize: 12),
                         ),
                       ],
                     ),
                   ),
                 ],
+                ),
               ),
               const SizedBox(height: 12),
 
