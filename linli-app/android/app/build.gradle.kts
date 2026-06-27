@@ -7,17 +7,18 @@ plugins {
 
 android {
     namespace = "com.example.linli"
-    compileSdk = flutter.compileSdkVersion
-    // 固定使用 27.x，与所有插件要求的 NDK 版本对齐（向后兼容）
-    ndkVersion = "27.0.12077973"
+    // maplibre_gl 0.26+ 要求 compileSdk 36
+    compileSdk = 36
+    // 对齐 maplibre_gl 要求的 NDK 版本（向后兼容）
+    ndkVersion = "28.1.13356709"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        jvmTarget = "21"
     }
 
     defaultConfig {
@@ -25,7 +26,8 @@ android {
         applicationId = "com.example.linli"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // maplibre_gl 13.x (android-sdk-opengl) 要求 minSdk 至少 23
+        minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

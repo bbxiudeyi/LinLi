@@ -18,8 +18,8 @@ dependencies:
   go_router: ^14.8.1
 
   # 地图 & 定位
-  # （amap 官方插件 3.0.0 与新版 Flutter 不兼容，已换用 Mapbox 官方 SDK）
-  mapbox_maps_flutter: ^2.23.1
+  # （已从 Mapbox 官方 SDK 迁移到 MapLibre 开源 SDK，接入自托管 pixelmap 地图服务）
+  maplibre_gl: ^0.26.0
   geolocator: ^13.0.0
 
   # UI 组件

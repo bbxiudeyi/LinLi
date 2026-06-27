@@ -97,7 +97,7 @@ class ActivityDetailPage extends ConsumerWidget {
                   const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
 
-          // 轨迹地图（真实 Mapbox 地图）
+          // 轨迹地图（MapLibre + 自托管 pixelmap 底图）
           ActivityMap(
             points: detail.points,
             height: 220,

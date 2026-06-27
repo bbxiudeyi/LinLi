@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 地图瓦片加载所需网络权限（release 包必须显式声明） -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- 运动录制所需定位权限 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
