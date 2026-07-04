@@ -13,9 +13,9 @@ class MapConfig {
   static const String styleUrl =
       'http://127.0.0.1:8080/styles/pixel/style.json';
 
-  /// 地图默认中心点（摩纳哥，测试数据范围）。
-  /// 切换到中国数据后应改为目标城市坐标，如北京 [116.4074, 39.9042]。
-  static const double defaultCenterLng = 7.42;
-  static const double defaultCenterLat = 43.74;
-  static const double defaultZoom = 13.0;
+  /// 地图默认中心点（成都）。
+  /// 无轨迹数据时地图定位到这里。
+  static const double defaultCenterLng = 104.0668;
+  static const double defaultCenterLat = 30.6634;
+  static const double defaultZoom = 11.0;
 }
