@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'core/db/local_db.dart';
-import 'core/map/mapbox_config.dart';
 import 'core/network/api_client.dart';
 import 'app/app.dart';
 
@@ -15,10 +13,7 @@ void main() async {
   // 本地数据库初始化（离线存储）
   await LocalDb.instance.init();
 
-  // Mapbox：必须在任何 MapWidget 创建前设置 access token
-  if (MapboxConfig.isConfigured) {
-    MapboxOptions.setAccessToken(MapboxConfig.publicToken);
-  }
+  // 注：MapLibre 自建瓦片无需 token，不需要全局初始化
 
   runApp(const ProviderScope(child: TujiApp()));
 }
