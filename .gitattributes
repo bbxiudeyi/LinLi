@@ -1,0 +1,5 @@
+# 跨平台依赖锁文件处理
+# pubspec.lock 在不同平台（macOS/iOS vs Windows）会解析出不同的依赖树
+# （Windows 无 iOS 构建能力，缺 objective_c 等包）。
+# merge 时优先保留当前分支版本，避免跨平台污染。
+linli-app/pubspec.lock merge=ours

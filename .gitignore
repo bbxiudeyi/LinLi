@@ -26,6 +26,9 @@ tmp/
 # Docker（卷数据不推）
 docker-data/
 
+# 构建产物（dist/ 是从镜像里拷出的二进制 + migrations，不进版本库）
+dist/
+
 # 截图/调试文件
 *.png
 *.jpg
