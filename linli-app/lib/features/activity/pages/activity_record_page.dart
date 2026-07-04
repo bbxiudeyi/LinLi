@@ -87,8 +87,12 @@ class _ReadyViewState extends State<_ReadyView> {
   Future<void> _begin() async {
     if (_starting) return;
     setState(() => _starting = true);
-    await widget.ref.read(gpsTrackerProvider.notifier).beginRecording();
-    if (mounted) setState(() => _starting = false);
+    try {
+      await widget.ref.read(gpsTrackerProvider.notifier).beginRecording();
+    } finally {
+      // 无论成功失败都要关掉加载态，否则权限被拒时会永远转圈
+      if (mounted) setState(() => _starting = false);
+    }
   }
 
   @override
