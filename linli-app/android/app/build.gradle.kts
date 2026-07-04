@@ -32,7 +32,7 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // Mapbox SDK 方法数巨大，必须启用 multidex 避免 ClassNotFoundException
+        // 地图 SDK 方法数较多，启用 multidex 避免 ClassNotFoundException
         multiDexEnabled = true
     }
 

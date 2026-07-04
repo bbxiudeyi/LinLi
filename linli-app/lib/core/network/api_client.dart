@@ -1,15 +1,9 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 后端 API 基础地址。
-/// - 模拟器：用 127.0.0.1 + adb reverse tcp:3000 tcp:3000 转发（绕过模拟器坏掉的虚拟网络）
-/// - 真机调试用电脑局域网 IP，如 `http://192.168.x.x:3000`
-/// - 生产环境改为正式域名
-/// - 端口 3000（避开 pixelmap-server 占用的 8080）
-const String _kBaseUrl = kReleaseMode
-    ? 'https://www.bbtech.com/api/v1'
-    : 'http://127.0.0.1:3000/api/v1';
+/// debug / release 都走线上后端（api.bbtech.top，HTTPS）。
+const String _kBaseUrl = 'https://api.bbtech.top/api/v1';
 
 const String _kTokenKey = 'linli_jwt_token';
 

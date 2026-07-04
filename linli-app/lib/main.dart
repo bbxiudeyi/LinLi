@@ -13,8 +13,7 @@ void main() async {
   // 本地数据库初始化（离线存储）
   await LocalDb.instance.init();
 
-  // 注：地图使用 MapLibre 开源 SDK + 自托管 pixelmap 服务，
-  // 不需要像 Mapbox 那样在启动时设置 access token。
+  // 注：MapLibre 自建瓦片无需 token，不需要全局初始化
 
   runApp(const ProviderScope(child: TujiApp()));
 }

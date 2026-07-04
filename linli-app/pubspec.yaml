@@ -17,9 +17,8 @@ dependencies:
   # 路由
   go_router: ^14.8.1
 
-  # 地图 & 定位
-  # （已从 Mapbox 官方 SDK 迁移到 MapLibre 开源 SDK，接入自托管 pixelmap 地图服务）
-  maplibre_gl: ^0.26.0
+  # 地图 & 定位（自建 MapLibre 瓦片服务 map.bbtech.top，无需 token）
+  maplibre_gl: ^0.26.1
   geolocator: ^13.0.0
 
   # UI 组件

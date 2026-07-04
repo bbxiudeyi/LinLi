@@ -1,9 +1,16 @@
 # ============================================
-# 林立生产环境部署清单
+# 林立生产环境部署清单（api.bbtech.top）
 # ============================================
 # 启动：docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 # 停止：docker compose -f docker-compose.prod.yml down
 # 看日志：docker compose -f docker-compose.prod.yml logs -f
+# ============================================
+#
+# 注意：
+# - api 服务用预构建镜像 linli-api:latest（在 Mac 上 buildx 构建 linux/amd64 后导入服务器）
+#   服务器上需先 `docker load < linli-api.tar.gz`
+# - 端口绑 127.0.0.1:8081（只本机访问），由外部 Caddy 反代到 api.bbtech.top
+# - PostgreSQL 内存调小，适合 2GB 服务器
 # ============================================
 
 services:
@@ -24,20 +31,28 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    # 2GB 服务器关键：限制内存
+    # 内存调小（适合 2GB 服务器）
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=16MB
+      -c effective_cache_size=256MB
+      -c max_connections=50
     deploy:
       resources:
         limits:
-          memory: 700M
+          memory: 512M
     # 数据库不对外暴露（只容器间通信）
     networks:
       - linli-net
 
-  # ---- Rust 后端 ----
+  # ---- Rust 后端（服务器现场构建）----
   api:
     build:
       context: ./linli-server
       dockerfile: Dockerfile
+    image: linli-api:latest
     container_name: linli-api
     restart: unless-stopped
     depends_on:
@@ -50,7 +65,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
       HOST: 0.0.0.0
       PORT: 8080
-    # 后端不直接对外，由 Caddy 反代
+    ports:
+      # 只绑本机回环，由 Caddy 反代；端口 8081 避开 linli_map 的 8080
+      - "127.0.0.1:8081:8080"
     networks:
       - linli-net
     deploy:
@@ -58,49 +75,9 @@ services:
         limits:
           memory: 200M
 
-  # ---- Vue 网页（nginx 静态托管）----
-  web:
-    build:
-      context: ./linli-web
-      dockerfile: Dockerfile
-    container_name: linli-web
-    restart: unless-stopped
-    networks:
-      - linli-net
-    deploy:
-      resources:
-        limits:
-          memory: 50M
-
-  # ---- Caddy（反代 + 自动 HTTPS）----
-  caddy:
-    image: caddy:2-alpine
-    container_name: linli-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    environment:
-      DOMAIN: ${DOMAIN}
-    depends_on:
-      - api
-      - web
-    networks:
-      - linli-net
-    deploy:
-      resources:
-        limits:
-          memory: 100M
-
 networks:
   linli-net:
     driver: bridge
 
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:
