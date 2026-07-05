@@ -86,7 +86,7 @@ class _SegmentCard extends StatelessWidget {
                 Icon(
                   sportType == 'ride' ? Icons.pedal_bike : Icons.directions_run,
                   size: 20,
-                  color: const Color(0xFFFF6B35),
+                  color: const Color(0xFF000000),
                 ),
                 const SizedBox(width: 8),
                 Expanded(

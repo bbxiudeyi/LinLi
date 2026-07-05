@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../shared/widgets/activity_map.dart';
 import '../providers/activity_provider.dart';
+import '../services/activity_stats.dart';
 
 class ActivityDetailPage extends ConsumerWidget {
   final String activityId;
@@ -41,6 +43,42 @@ class ActivityDetailPage extends ConsumerWidget {
     }
   }
 
+  /// 删除活动：二次确认 → 云端+本地删除 → 刷新活跃日历 → 返回上一页。
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除活动'),
+        content: const Text('确定删除此活动？此操作不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton.tonal(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await ref.read(activityListProvider.notifier).deleteActivity(activityId);
+    // 删除后刷新活跃日历（Profile 页的活动列表靠 onChanged 回调自动刷新）
+    ref.read(activityStatsProvider.notifier).load();
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('活动已删除')),
+    );
+    context.pop();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final detail = ref.watch(activityDetailProvider(activityId));
@@ -55,6 +93,14 @@ class ActivityDetailPage extends ConsumerWidget {
             onPressed: detail.activity == null
                 ? null
                 : () => _exportGpx(context, ref),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: '删除活动',
+            // 详情加载完才允许删除
+            onPressed: detail.activity == null
+                ? null
+                : () => _confirmDelete(context, ref),
           ),
         ],
       ),

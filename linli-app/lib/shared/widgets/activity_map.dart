@@ -59,6 +59,10 @@ class _ActivityMapState extends State<ActivityMap> {
       myLocationTrackingMode: widget.showLocationPuck
           ? MyLocationTrackingMode.tracking
           : MyLocationTrackingMode.none,
+      // 录制模式下用 compass 模式：puck 显示指南针方向箭头（iOS 上也更稳定）
+      myLocationRenderMode: widget.showLocationPuck
+          ? MyLocationRenderMode.compass
+          : MyLocationRenderMode.normal,
       // 交互开关
       rotateGesturesEnabled: widget.interactive,
       scrollGesturesEnabled: widget.interactive,
@@ -128,6 +132,11 @@ class _ActivityMapState extends State<ActivityMap> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.points.length != widget.points.length) {
       _renderTrack();
+      // 准备页场景：style 先加载（当时 points 空，相机没 apply），
+      // selectSport 拿到首位置后 points 更新，这里补一次相机跟随。
+      if (!_cameraApplied && widget.points.isNotEmpty) {
+        _applyCamera();
+      }
     }
   }
 

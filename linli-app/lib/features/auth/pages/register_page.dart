@@ -76,7 +76,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                 '创建账号',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xFFFF6B35),
+                      color: const Color(0xFF000000),
                     ),
               ),
               const SizedBox(height: 32),

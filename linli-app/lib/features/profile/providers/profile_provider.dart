@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -118,6 +120,20 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
       debugPrint('更新资料异常: $e');
       return false;
     }
+  }
+
+  /// 上传头像：选好的图片文件 → 上传到后端 → PATCH /users/me 写入 avatar_url。
+  /// 成功返回 true（本地 state + 缓存已刷新），失败返回 false。
+  /// 图片压缩由调用方（image_picker 的 maxWidth/imageQuality）完成。
+  Future<bool> uploadAvatar(File image) async {
+    // ① 上传文件拿 URL
+    final url = await ApiClient.instance.uploadAvatar(image);
+    if (url == null) {
+      debugPrint('头像上传失败');
+      return false;
+    }
+    // ② PATCH /users/me 写入 avatar_url（复用 updateProfile 的刷新逻辑）
+    return updateProfile({'avatar_url': url});
   }
 }
 

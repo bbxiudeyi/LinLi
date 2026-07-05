@@ -50,6 +50,7 @@ pub struct AuthResponse {
 #[derive(Debug, Deserialize, Default)]
 pub struct UpdateUserRequest {
     pub nickname: Option<String>,
+    pub avatar_url: Option<String>, // 头像 URL（上传后由前端写入）
     pub bio: Option<String>,
     pub gender: Option<String>,
     pub birthday: Option<NaiveDate>,

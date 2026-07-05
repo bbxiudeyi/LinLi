@@ -65,7 +65,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 '林立',
                 style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xFFFF6B35),
+                      color: const Color(0xFF000000),
                     ),
                 textAlign: TextAlign.center,
               ),

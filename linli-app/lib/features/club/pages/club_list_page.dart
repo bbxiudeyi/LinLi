@@ -20,12 +20,12 @@ class ClubListPage extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B35).withValues(alpha: 0.08),
+                color: const Color(0xFF000000).withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.explore, color: Color(0xFFFF6B35)),
+                  const Icon(Icons.explore, color: Color(0xFF000000)),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -75,11 +75,11 @@ class _ClubCard extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 24,
-                    backgroundColor: const Color(0xFFFF6B35).withValues(alpha: 0.15),
+                    backgroundColor: const Color(0xFF000000).withValues(alpha: 0.15),
                     child: Text(
                       (club['name'] as String?)?.substring(0, 1) ?? '?',
                       style: const TextStyle(
-                          color: Color(0xFFFF6B35),
+                          color: Color(0xFF000000),
                           fontSize: 20,
                           fontWeight: FontWeight.bold),
                     ),
@@ -108,13 +108,13 @@ class _ClubCard extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
+                      color: Colors.grey.shade200,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       '$guides 位向导',
                       style:
-                          TextStyle(color: Colors.blue.shade700, fontSize: 12),
+                          TextStyle(color: Colors.grey.shade700, fontSize: 12),
                     ),
                   ),
                 ],

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -78,5 +80,20 @@ class ApiClient {
     _token = null; // 同步更新内存
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kTokenKey);
+  }
+
+  /// 上传头像图片到后端，返回图片的公开 URL。
+  /// 用 multipart/form-data，字段名 `file`（后端约定）。
+  /// 失败返回 null，调用方决定提示。
+  Future<String?> uploadAvatar(File image) async {
+    try {
+      final form = FormData.fromMap({
+        'file': await MultipartFile.fromFile(image.path, filename: 'avatar.jpg'),
+      });
+      final res = await dio.post('/uploads/avatar', data: form);
+      return res.data['url'] as String?;
+    } catch (e) {
+      return null;
+    }
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/db/local_db.dart';
 import '../../../shared/widgets/activity_map.dart';
 import '../models/activity_models.dart';
 import '../services/gps_tracker.dart';
@@ -16,137 +17,92 @@ class ActivityRecordPage extends ConsumerWidget {
     return switch (tracking.state) {
       // 选运动类型
       RecordingState.idle => _SportSelection(ref: ref),
-      // 选完运动，待开始
-      RecordingState.ready => _ReadyView(tracking: tracking, ref: ref),
-      // 录制中 和 暂停 共用同一视图（地图不消失，只换底部按钮）
+      // 准备页 + 录制中 + 暂停 合并成一个连续视图（地图不销毁，无缝切换）
+      RecordingState.ready ||
       RecordingState.recording ||
       RecordingState.paused =>
-        _ActiveView(tracking: tracking, ref: ref),
+        _RecordSessionView(tracking: tracking, ref: ref),
       // 停止后：保存页
       RecordingState.stopped => _SaveView(tracking: tracking, ref: ref),
     };
   }
 }
 
-/// 运动类型选择页（idle 态）。
-class _SportSelection extends ConsumerWidget {
+/// 运动类型选择页（idle 态）。选完运动后会请求权限+定位，期间显示加载遮罩。
+class _SportSelection extends ConsumerStatefulWidget {
   const _SportSelection({required this.ref});
   final WidgetRef ref;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final sports = SportType.values;
-
-    return Scaffold(
-      body: SafeArea(
-        child: GridView.count(
-          crossAxisCount: 2,
-          padding: const EdgeInsets.all(24),
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          children: sports.map((sport) {
-            return Card(
-              child: InkWell(
-                onTap: () =>
-                    ref.read(gpsTrackerProvider.notifier).selectSport(sport),
-                borderRadius: BorderRadius.circular(12),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(sport.icon, style: const TextStyle(fontSize: 48)),
-                    const SizedBox(height: 8),
-                    Text(
-                      sport.label,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
+  ConsumerState<_SportSelection> createState() => _SportSelectionState();
 }
 
-/// 准备页（ready 态）：选完运动类型、未开始录制，显示"开始"按钮。
-class _ReadyView extends StatefulWidget {
-  final TrackingState tracking;
-  final WidgetRef ref;
-
-  const _ReadyView({required this.tracking, required this.ref});
-
-  @override
-  State<_ReadyView> createState() => _ReadyViewState();
-}
-
-class _ReadyViewState extends State<_ReadyView> {
+class _SportSelectionState extends ConsumerState<_SportSelection> {
   bool _starting = false;
 
-  Future<void> _begin() async {
+  Future<void> _onSelect(SportType sport) async {
     if (_starting) return;
     setState(() => _starting = true);
     try {
-      await widget.ref.read(gpsTrackerProvider.notifier).beginRecording();
+      await widget.ref.read(gpsTrackerProvider.notifier).selectSport(sport);
     } finally {
-      // 无论成功失败都要关掉加载态，否则权限被拒时会永远转圈
       if (mounted) setState(() => _starting = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final sport = widget.tracking.sportType;
+    final sports = SportType.values;
+
     return Scaffold(
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Text(sport.icon, style: const TextStyle(fontSize: 24)),
-                  const SizedBox(width: 8),
-                  Text(sport.label,
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: _starting
-                        ? null
-                        : () => widget.ref
-                            .read(gpsTrackerProvider.notifier)
-                            .reset(),
-                    child: const Text('换一个'),
+            GridView.count(
+              crossAxisCount: 2,
+              padding: const EdgeInsets.all(24),
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
+              children: sports.map((sport) {
+                return Card(
+                  child: InkWell(
+                    onTap: _starting ? null : () => _onSelect(sport),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(sport.icon, style: const TextStyle(fontSize: 48)),
+                        const SizedBox(height: 8),
+                        Text(
+                          sport.label,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
+                );
+              }).toList(),
             ),
-            const Spacer(),
-            Text(sport.icon, style: const TextStyle(fontSize: 96)),
-            const SizedBox(height: 16),
-            Text('准备好了吗？',
-                style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            Text('点击开始后开始记录你的${sport.label}',
-                style: TextStyle(color: Colors.grey[600])),
-            const Spacer(),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 48),
-              child: FloatingActionButton.large(
-                backgroundColor: const Color(0xFFFF6B35),
-                onPressed: _starting ? null : _begin,
-                child: _starting
-                    ? const SizedBox(
-                        height: 28,
-                        width: 28,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 3),
-                      )
-                    : const Icon(Icons.play_arrow,
-                        color: Colors.white, size: 48),
+            // 加载遮罩：请求权限 / 拿首个定位期间显示
+            if (_starting)
+              Container(
+                color: Colors.black38,
+                child: const Center(
+                  child: Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text('正在定位...'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -154,30 +110,60 @@ class _ReadyViewState extends State<_ReadyView> {
   }
 }
 
-/// 录制中 + 暂停 共用视图（地图始终显示，只切底部按钮）。
-/// paused 态时不隐藏地图，只把"暂停"按钮换成"继续"按钮。
-class _ActiveView extends StatelessWidget {
+/// 录制会话视图（ready / recording / paused 三态共用）。
+///
+/// 关键设计：地图 ActivityMap 用固定的 ValueKey，三态切换时
+/// Widget 树保持同一个实例，地图不被销毁重建，实现"无缝衔接"。
+/// 状态变化只影响底部按钮区（开始 ↔ 暂停/结束）和数据块是否显示。
+class _RecordSessionView extends StatefulWidget {
   final TrackingState tracking;
   final WidgetRef ref;
 
-  const _ActiveView({required this.tracking, required this.ref});
+  const _RecordSessionView({required this.tracking, required this.ref});
 
-  bool get _isPaused => tracking.state == RecordingState.paused;
+  @override
+  State<_RecordSessionView> createState() => _RecordSessionViewState();
+}
+
+class _RecordSessionViewState extends State<_RecordSessionView> {
+  bool _starting = false;
+
+  bool get _isReady =>
+      widget.tracking.state == RecordingState.ready;
+  bool get _isPaused =>
+      widget.tracking.state == RecordingState.paused;
+  bool get _isActive =>
+      widget.tracking.state == RecordingState.recording ||
+      widget.tracking.state == RecordingState.paused;
+
+  Future<void> _begin() async {
+    if (_starting) return;
+    setState(() => _starting = true);
+    try {
+      await widget.ref.read(gpsTrackerProvider.notifier).beginRecording();
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final sport = widget.tracking.sportType;
+    // 地图固定高度：屏幕高度的 55%，不论底部内容多少都不变。
+    // 这样准备态→录制态切换时，地图框体大小保持不变。
+    final mapHeight = MediaQuery.of(context).size.height * 0.55;
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
+            // ===== 顶部栏 =====
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Text(tracking.sportType.icon,
-                      style: const TextStyle(fontSize: 24)),
+                  Text(sport.icon, style: const TextStyle(fontSize: 24)),
                   const SizedBox(width: 8),
-                  Text(tracking.sportType.label,
+                  Text(sport.label,
                       style: Theme.of(context).textTheme.titleLarge),
                   const Spacer(),
                   if (_isPaused)
@@ -190,20 +176,30 @@ class _ActiveView extends StatelessWidget {
                       ),
                       child: Text('已暂停',
                           style: TextStyle(
-                              color: Colors.blueGrey.shade700,
-                              fontSize: 12)),
+                              color: Colors.blueGrey.shade700, fontSize: 12)),
+                    ),
+                  if (_isReady)
+                    TextButton(
+                      onPressed: _starting
+                          ? null
+                          : () => widget.ref
+                              .read(gpsTrackerProvider.notifier)
+                              .reset(),
+                      child: const Text('换一个'),
                     ),
                 ],
               ),
             ),
-            // 地图（录制中和暂停都显示，不隐藏）
-            Expanded(
-              flex: 3,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+            // ===== 地图（固定高度 + 固定 key，三态无缝衔接）=====
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                height: mapHeight,
                 child: ActivityMap(
-                  points: tracking.gpsPoints,
-                  interactive: false,
+                  key: const ValueKey('session_map'),
+                  points: widget.tracking.gpsPoints,
+                  height: mapHeight,
+                  interactive: true,
                   fitBounds: false,
                   alwaysShowMap: true,
                   showLocationPuck: true,
@@ -211,67 +207,100 @@ class _ActiveView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
+            // ===== 底部区：剩余空间，按钮位置跨态保持一致 =====
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.start,
                 children: [
-                  _DataBlock(
-                    label: '距离',
-                    value: tracking.distanceDisplay,
-                    unit: tracking.distanceMeters >= 1000 ? 'km' : 'm',
-                  ),
-                  _DataBlock(
-                    label: '用时',
-                    value: tracking.durationDisplay,
-                    unit: '',
-                  ),
-                  _DataBlock(
-                    label: '配速',
-                    value: tracking.avgPaceDisplay,
-                    unit: '/km',
-                  ),
-                  _DataBlock(
-                    label: '爬升',
-                    value: tracking.elevationGain.toStringAsFixed(0),
-                    unit: 'm',
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            // 底部按钮：暂停↔继续 切换，结束按钮常驻
-            Padding(
-              padding: const EdgeInsets.only(bottom: 32),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  FloatingActionButton.large(
-                    heroTag: 'toggle',
-                    backgroundColor:
-                        _isPaused ? const Color(0xFFFF6B35) : Colors.blueGrey,
-                    onPressed: () {
-                      final n = ref.read(gpsTrackerProvider.notifier);
-                      if (_isPaused) {
-                        n.resume();
-                      } else {
-                        n.pause();
-                      }
-                    },
-                    tooltip: _isPaused ? '继续' : '暂停',
-                    child: Icon(
-                      _isPaused ? Icons.play_arrow : Icons.pause,
-                      color: Colors.white,
-                      size: 40,
+                  // 录制中/暂停：显示数据块（准备态不显示，留白）
+                  if (_isActive)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          _DataBlock(
+                            label: '距离',
+                            value: widget.tracking.distanceDisplay,
+                            unit: widget.tracking.distanceMeters >= 1000 ? 'km' : 'm',
+                          ),
+                          _DataBlock(
+                            label: '用时',
+                            value: widget.tracking.durationDisplay,
+                            unit: '',
+                          ),
+                          _DataBlock(
+                            label: '配速',
+                            value: widget.tracking.avgPaceDisplay,
+                            unit: '/km',
+                          ),
+                          _DataBlock(
+                            label: '爬升',
+                            value: widget.tracking.elevationGain.toStringAsFixed(0),
+                            unit: 'm',
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  FloatingActionButton.large(
-                    heroTag: 'stop',
-                    backgroundColor: Colors.red,
-                    onPressed: () =>
-                        ref.read(gpsTrackerProvider.notifier).stop(),
-                    tooltip: '结束',
-                    child:
-                        const Icon(Icons.stop, color: Colors.white, size: 40),
+                  const Spacer(),
+                  // 按钮行：开始/暂停/继续 按钮始终在同一位置，
+                  // 录制态时右侧多一个停止按钮。
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 32),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 主按钮：开始 / 暂停 / 继续（位置不变）
+                        FloatingActionButton.large(
+                          heroTag: 'toggle',
+                          backgroundColor: const Color(0xFF000000),
+                          onPressed: _isActive
+                              ? () {
+                                  final n = widget.ref
+                                      .read(gpsTrackerProvider.notifier);
+                                  if (_isPaused) {
+                                    n.resume();
+                                  } else {
+                                    n.pause();
+                                  }
+                                }
+                              : (_starting ? null : _begin),
+                          tooltip: _isReady
+                              ? '开始'
+                              : (_isPaused ? '继续' : '暂停'),
+                          child: _starting
+                              ? const SizedBox(
+                                  height: 28,
+                                  width: 28,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 3),
+                                )
+                              : Icon(
+                                  _isReady
+                                      ? Icons.play_arrow
+                                      : (_isPaused
+                                          ? Icons.play_arrow
+                                          : Icons.pause),
+                                  color: Colors.white,
+                                  size: 48,
+                                ),
+                        ),
+                        // 录制态：右侧加停止按钮
+                        if (_isActive) ...[
+                          const SizedBox(width: 48),
+                          FloatingActionButton.large(
+                            heroTag: 'stop',
+                            backgroundColor: Colors.red,
+                            onPressed: () => widget.ref
+                                .read(gpsTrackerProvider.notifier)
+                                .stop(),
+                            tooltip: '结束',
+                            child: const Icon(Icons.stop,
+                                color: Colors.white, size: 40),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -317,10 +346,16 @@ class _SaveViewState extends State<_SaveView> {
     final summary =
         await widget.ref.read(gpsTrackerProvider.notifier).buildSummary();
     if (summary == null) {
+      // 点数不足（< 2）或无开始时间：删除录制时建的空壳活动行 + 点，
+      // 避免它作为"未同步"僵尸活动留在列表里。
+      final localId = widget.tracking.localActivityId;
+      if (localId != null) {
+        await LocalDb.instance.deleteActivity(localId);
+      }
       widget.ref.read(gpsTrackerProvider.notifier).reset();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('没有录制到有效轨迹')),
+          const SnackBar(content: Text('轨迹太短，无法保存有效活动')),
         );
         context.go('/feed');
       }

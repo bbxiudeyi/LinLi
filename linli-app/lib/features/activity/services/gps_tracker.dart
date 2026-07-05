@@ -129,16 +129,38 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
 
   GpsTrackerNotifier() : super(const TrackingState());
 
-  void selectSport(SportType type) {
-    // 选完运动类型进入"准备"状态，等用户点"开始"才真正录制
+  /// 选运动类型，进入"准备"状态（ready），并**提前做定位准备**：
+  /// 请求权限 + 拿首个 GPS 位置，让准备页的地图能立即显示用户当前位置 + puck。
+  /// 但**不**开始录制（不建活动行、不订阅 GPS 流），等用户点"开始"才真正录。
+  ///
+  /// 这样用户进准备页就能看到"我在地图上的位置"，确认无误后再点开始。
+  Future<void> selectSport(SportType type) async {
+    // 先切到 ready 态，准备页立即显示（地图先用默认视野占位）
     state = state.copyWith(sportType: type, state: RecordingState.ready);
+
+    // 请求权限（失败时写 locationError，准备页可提示）
+    try {
+      await LocationService.ensureReady();
+    } on LocationException catch (e) {
+      state = state.copyWith(locationError: e.message);
+      return;
+    }
+
+    // 拿一次当前位置，加入 state，地图会自动定位过去并显示 puck
+    try {
+      final initial = await LocationService.getCurrentPosition();
+      _onPosition(initial);
+      // 拿到位置后清掉错误提示
+      if (state.locationError != null) {
+        state = state.copyWith(locationError: null);
+      }
+    } catch (_) {
+      // 获取首个位置失败不阻塞：地图停在默认视野，用户点开始后还能再试
+    }
   }
 
   /// 用户点了"开始"按钮，真正开始录制。
-  /// 会先检查定位权限，失败时把错误写入 [TrackingState.locationError]。
-  ///
-  /// 关键：先把第一个 GPS 点拿到，再把 state 切到 recording——
-  /// 这样地图一出现就已经有定位点，直接定位到那里，不会先跳默认视野（北京）。
+  /// 复用 selectSport 已拿到的首个定位点（state.gpsPoints 里的最后一个）。
   ///
   /// 离线防丢：开始时在本地 DB 创建活动行（sync_status=0 待同步），
   /// 之后每个 GPS 点实时写入 activity_points 表，App 被杀也不丢。
@@ -146,6 +168,7 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
     // 只允许从 ready 态开始（避免重复触发）
     if (state.state != RecordingState.ready) return;
 
+    // 权限/服务已在 selectSport 时检查过，这里兜底再确认一次
     try {
       await LocationService.ensureReady();
     } on LocationException catch (e) {
@@ -165,20 +188,15 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
     });
     state = state.copyWith(localActivityId: activityId);
 
-    // 先拿一次当前位置（不切 state，页面还在准备态）
-    Position? initial;
-    try {
-      initial = await LocationService.getCurrentPosition();
-    } catch (_) {
-      // 获取当前位置失败不阻塞，继续订阅流，后续会补上
+    // 若准备阶段没拿到首位置（selectSport 失败），这里再补一次
+    if (state.gpsPoints.isEmpty) {
+      try {
+        final initial = await LocationService.getCurrentPosition();
+        _onPosition(initial);
+      } catch (_) {}
     }
 
-    // 拿到点后再切到 recording，并把点加入 state
-    if (initial != null) {
-      _onPosition(initial); // 先累积点（此时页面还不知道，但 state 已有点）
-    }
-
-    // 现在 state 已有定位点，切到 recording 触发页面渲染地图
+    // 切到 recording 触发页面切到录制视图
     state = state.copyWith(
       state: RecordingState.recording,
       locationError: null,
@@ -322,9 +340,10 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
   }
 
   /// 结束录制，构建汇总并写回本地活动行的最终统计。
-  /// 返回 null 表示没有有效数据（无点或无开始时间）。
+  /// 返回 null 表示没有有效数据（点数不足或无开始时间）。
+  /// 点数阈值 2 与 retryUnsynced 一致：< 2 个点无法构成轨迹，不保存。
   Future<ActivitySummary?> buildSummary() async {
-    if (state.gpsPoints.isEmpty || _startTime == null) return null;
+    if (state.gpsPoints.length < 2 || _startTime == null) return null;
 
     final endTime = DateTime.now();
     // 平均速度/配速用移动时间（movingTimeSeconds）算，剔除等红灯/休息，

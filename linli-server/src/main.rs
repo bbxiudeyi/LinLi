@@ -11,6 +11,7 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 /// 全局应用状态（共享给所有 handler）。
@@ -49,10 +50,15 @@ async fn main() -> anyhow::Result<()> {
     // CORS
     let cors = build_cors(&config.cors_origins);
 
-    // 路由
-    let app = Router::new()
+    // ===== 公开路由（不需要鉴权）=====
+    // health 检查 + 上传的静态文件（图片加载不带 Authorization header）
+    let public_routes = Router::new()
         .route("/health", get(health))
-        // 认证（公开）
+        .nest_service("/uploads", ServeDir::new(&config.upload_dir));
+
+    // ===== 鉴权路由（所有 /api/v1/* 都要登录）=====
+    let protected_routes = Router::new()
+        // 认证（公开但挂在鉴权路由下，auth_middleware 会跳过 register/login）
         .route("/api/v1/auth/register", post(handlers::auth::register))
         .route("/api/v1/auth/login", post(handlers::auth::login))
         .route("/api/v1/auth/logout", post(handlers::auth::logout))
@@ -64,6 +70,11 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/users/:id/follow",
             delete(handlers::social::unfollow_user),
+        )
+        // 头像上传（要登录）
+        .route(
+            "/api/v1/uploads/avatar",
+            post(handlers::uploads::upload_avatar),
         )
         // 活动
         .route("/api/v1/activities", get(handlers::activity::list_my_activities))
@@ -83,7 +94,12 @@ async fn main() -> anyhow::Result<()> {
         // 层的顺序（从外到内执行）：trace → cors → middleware → extension → routes
         // extension 必须在中间件"之前"（更内层），中间件才能在 extensions 里读到
         .layer(axum::middleware::from_fn(auth::auth_middleware))
-        .layer(axum::Extension(state.clone()))
+        .layer(axum::Extension(state.clone()));
+
+    // 合并：公开路由 + 鉴权路由，共享 cors / trace / state
+    let app = Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

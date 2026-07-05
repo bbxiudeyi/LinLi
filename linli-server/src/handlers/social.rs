@@ -58,19 +58,21 @@ pub async fn update_my_profile(
     let user: crate::models::UserProfile = sqlx::query_as(
         r#"UPDATE users SET
              nickname = COALESCE($1, nickname),
-             bio = $2,
-             gender = $3,
-             birthday = $4,
-             weight_kg = $5,
-             password_hash = COALESCE($6, password_hash),
-             token_version = CASE WHEN $7::boolean
+             avatar_url = COALESCE($2, avatar_url),
+             bio = $3,
+             gender = $4,
+             birthday = $5,
+             weight_kg = $6,
+             password_hash = COALESCE($7, password_hash),
+             token_version = CASE WHEN $8::boolean
                                   THEN token_version + 1
                                   ELSE token_version END
-           WHERE id = $8
+           WHERE id = $9
            RETURNING id, email, nickname, avatar_url, bio, gender, birthday,
                      weight_kg, created_at"#,
     )
     .bind(&req.nickname)
+    .bind(&req.avatar_url)
     .bind(req.bio.as_deref())
     .bind(req.gender.as_deref())
     .bind(req.birthday)

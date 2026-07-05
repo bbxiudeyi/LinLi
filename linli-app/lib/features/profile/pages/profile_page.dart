@@ -53,14 +53,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             // 头部：头像 + 昵称 + 设置
             _ProfileHeader(
               profile: profile.profile,
-              onSettings: () => _showSettings(context, ref),
+              onSettings: () => _showSettings(context),
             ),
             // 面板 / 活动 Tab
             TabBar(
               controller: _tabController,
-              labelColor: const Color(0xFFFF6B35),
+              labelColor: const Color(0xFF000000),
               unselectedLabelColor: Colors.grey,
-              indicatorColor: const Color(0xFFFF6B35),
+              indicatorColor: const Color(0xFF000000),
               tabs: const [
                 Tab(text: '面板'),
                 Tab(text: '活动'),
@@ -105,21 +105,77 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     );
   }
 
-  void _showSettings(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
+  void _showSettings(BuildContext context) {
+    showGeneralDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) {
-          final isDark = ref.read(themeModeProvider) == ThemeMode.dark;
-          return SafeArea(
+      // 挂到根 navigator，切 tab 时能用 rootNavigator 关掉，避免残留蒙罩。
+      useRootNavigator: true,
+      // 点击蒙罩可关闭
+      barrierDismissible: true,
+      barrierLabel: '设置',
+      barrierColor: Colors.black54,
+      // 从顶部滑入、向顶部滑出
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          const _SettingsPanel(),
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final offset = Tween<Offset>(
+          begin: const Offset(0, -1), // 从上方进入
+          end: Offset.zero,
+        ).animate(CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        ));
+        return SlideTransition(position: offset, child: child);
+      },
+    );
+  }
+}
+
+/// 从顶部滑入的设置面板。包含编辑资料 / 深色模式开关 / 退出登录。
+class _SettingsPanel extends ConsumerStatefulWidget {
+  const _SettingsPanel();
+
+  @override
+  ConsumerState<_SettingsPanel> createState() => _SettingsPanelState();
+}
+
+class _SettingsPanelState extends ConsumerState<_SettingsPanel> {
+  @override
+  Widget build(BuildContext context) {
+    final isDark = ref.read(themeModeProvider) == ThemeMode.dark;
+    return SafeArea(
+      top: true,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF1E1E1E)
+                  : Colors.white,
+              borderRadius: const BorderRadius.all(Radius.circular(16)),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // 关闭按钮
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.edit_outlined),
                   title: const Text('编辑资料'),
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.of(context).pop();
                     context.push('/profile/edit');
                   },
                 ),
@@ -132,7 +188,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                       ref.read(themeModeProvider.notifier).setThemeMode(
                             val ? ThemeMode.dark : ThemeMode.light,
                           );
-                      setLocalState(() {});
+                      setState(() {});
                     },
                   ),
                 ),
@@ -141,15 +197,15 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   title: const Text('退出登录',
                       style: TextStyle(color: Colors.red)),
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.of(context).pop();
                     ref.read(authProvider.notifier).signOut();
                     context.go('/login');
                   },
                 ),
               ],
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
@@ -317,13 +373,13 @@ class _ActivitiesTabState extends State<_ActivitiesTab> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.orange.shade100,
+                                color: Colors.grey.shade300,
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text('未同步',
                                   style: TextStyle(
                                       fontSize: 10,
-                                      color: Colors.orange.shade800)),
+                                      color: Colors.grey.shade700)),
                             ),
                           ],
                         ],

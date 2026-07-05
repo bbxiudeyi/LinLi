@@ -1,12 +1,16 @@
+import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import '../providers/profile_provider.dart';
 
 /// 编辑个人资料页。
 ///
-/// 支持修改：昵称、简介、性别、生日、体重(kg)。
-/// 头像目前用占位（后续可接入 image_picker + 对象存储）。
+/// 支持修改：头像（点击选图，压缩 256px/JPEG80% 后上传）、
+/// 昵称、简介、性别、生日、体重(kg)。
 /// 字段对应数据库 users 表。
 class EditProfilePage extends ConsumerStatefulWidget {
   const EditProfilePage({super.key});
@@ -23,6 +27,12 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
   DateTime? _birthday;
   bool _saving = false;
 
+  /// 当前头像 URL（选图上传成功后立即更新，无需等"保存"按钮）。
+  String? _avatarUrl;
+  bool _uploadingAvatar = false;
+  // 防止头像 URL 缓存导致图片不刷新：上传成功后给 URL 加个时间戳
+  String? _avatarSuffix;
+
   @override
   void initState() {
     super.initState();
@@ -34,6 +44,54 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     _gender = p['gender'] as String?;
     final b = p['birthday'] as String?;
     if (b != null) _birthday = DateTime.tryParse(b);
+    _avatarUrl = p['avatar_url'] as String?;
+  }
+
+  /// 选图 + 压缩 + 上传。
+  /// image_picker 的 maxWidth/maxHeight/imageQuality 在选图时即完成压缩，
+  /// 输出的已是 256px、JPEG 80% 的小图（几 KB）。
+  Future<void> _pickAvatar() async {
+    if (_uploadingAvatar) return;
+    setState(() => _uploadingAvatar = true);
+    try {
+      final picker = ImagePicker();
+      final xfile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 256, // 压缩：最大边 256px
+        maxHeight: 256,
+        imageQuality: 80, // JPEG 质量 80%
+      );
+      if (xfile == null) {
+        // 用户取消
+        return;
+      }
+      final file = File(xfile.path);
+      final ok = await ref.read(profileProvider.notifier).uploadAvatar(file);
+      if (!ok) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('头像上传失败，请检查网络')),
+          );
+        }
+        return;
+      }
+      // 上传成功：从 provider 读回最新 avatar_url，刷新本地显示
+      final newUrl = ref.read(profileProvider).profile?['avatar_url'] as String?;
+      if (mounted) {
+        setState(() {
+          _avatarUrl = newUrl;
+          _avatarSuffix = '?t=${DateTime.now().millisecondsSinceEpoch}';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('选图失败: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingAvatar = false);
+    }
   }
 
   @override
@@ -97,25 +155,53 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 头像（占位，后续接入图片上传）
+            // 头像（点击选图上传）
             Center(
-              child: Stack(
-                children: [
-                  const CircleAvatar(radius: 48, child: Icon(Icons.person, size: 56)),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFFF6B35),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.camera_alt,
-                          size: 16, color: Colors.white),
+              child: GestureDetector(
+                onTap: _uploadingAvatar ? null : _pickAvatar,
+                child: Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 48,
+                      backgroundColor: Colors.grey.shade300,
+                      backgroundImage: (_avatarUrl != null && _avatarUrl!.isNotEmpty)
+                          ? CachedNetworkImageProvider(
+                              '$_avatarUrl$_avatarSuffix',
+                            )
+                          : null,
+                      child: (_avatarUrl == null || _avatarUrl!.isEmpty)
+                          ? const Icon(Icons.person, size: 56)
+                          : null,
                     ),
-                  ),
-                ],
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF000000),
+                          shape: BoxShape.circle,
+                        ),
+                        child: _uploadingAvatar
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.camera_alt,
+                                size: 16, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                '点击头像更换',
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
               ),
             ),
             const SizedBox(height: 24),

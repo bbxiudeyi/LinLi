@@ -9,6 +9,10 @@ pub struct Config {
     pub host: String,
     pub port: u16,
     pub cors_origins: Vec<String>,
+    /// 上传文件存储根目录（头像等用户文件）。
+    pub upload_dir: String,
+    /// 对外公开的基础 URL（用于拼上传文件的访问地址，如 https://api.bbtech.top）。
+    pub public_base_url: String,
 }
 
 impl Config {
@@ -33,6 +37,10 @@ impl Config {
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .collect(),
+            upload_dir: env::var("UPLOAD_DIR")
+                .unwrap_or_else(|_| "/opt/linli-server/uploads".into()),
+            public_base_url: env::var("PUBLIC_BASE_URL")
+                .unwrap_or_else(|_| "http://localhost:8080".into()),
         }
     }
 }

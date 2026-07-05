@@ -214,6 +214,23 @@ class LocalDb {
     );
   }
 
+  /// 删除一个活动及其全部轨迹点。
+  /// 两表无外键约束，手动删 activity_points 避免孤儿点；用事务保证原子性。
+  Future<void> deleteActivity(String id) async {
+    await _database.transaction((txn) async {
+      await txn.delete(
+        'activity_points',
+        where: 'activity_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete(
+        'activities',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
   /// 获取所有待同步（sync_status=0）的活动，供重试用。
   Future<List<Map<String, dynamic>>> getUnsyncedActivities() async {
     return _database.query(

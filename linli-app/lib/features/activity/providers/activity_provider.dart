@@ -141,6 +141,21 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
     }
   }
 
+  /// 删除活动：先删云端（失败不阻塞），再删本地，再刷新内存列表。
+  /// 后端已有 DELETE /activities/:id；云端失败时本地仍删（用户意图明确）。
+  Future<void> deleteActivity(String id) async {
+    // ① 云端删除（失败不阻塞本地删除）
+    try {
+      await ApiClient.instance.dio.delete('/activities/$id');
+    } catch (e) {
+      debugPrint('云端删除活动失败（继续删本地）: $e');
+    }
+    // ② 本地删除（活动行 + 轨迹点，事务保证原子）
+    await LocalDb.instance.deleteActivity(id);
+    // ③ 刷新内存中的活动列表
+    await loadMyActivities();
+  }
+
   /// 扫描所有未同步的活动，逐个上传重试。
   /// App 启动 / 登录成功后调用。幂等：后端 ON CONFLICT DO NOTHING 保证重传安全。
   Future<void> retryUnsynced() async {

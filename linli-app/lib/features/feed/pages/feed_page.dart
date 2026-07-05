@@ -193,7 +193,7 @@ class _ActivityCard extends StatelessWidget {
                     icon: Icon(
                       hasKudo ? Icons.thumb_up : Icons.thumb_up_outlined,
                       size: 20,
-                      color: hasKudo ? const Color(0xFFFF6B35) : null,
+                      color: hasKudo ? const Color(0xFF000000) : null,
                     ),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
@@ -214,12 +214,12 @@ class _ActivityCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: const Color(0xFFFF6B35).withValues(alpha: 0.1),
+        color: const Color(0xFF000000).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(text,
           style: const TextStyle(
-              color: Color(0xFFFF6B35),
+              color: Color(0xFF000000),
               fontSize: 12,
               fontWeight: FontWeight.w600)),
     );

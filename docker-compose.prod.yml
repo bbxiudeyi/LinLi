@@ -65,9 +65,16 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
       HOST: 0.0.0.0
       PORT: 8080
+      # 头像上传相关
+      UPLOAD_DIR: /opt/linli-server/uploads
+      PUBLIC_BASE_URL: https://api.bbtech.top
     ports:
       # 只绑本机回环，由 Caddy 反代；端口 8081 避开 linli_map 的 8080
       - "127.0.0.1:8081:8080"
+    volumes:
+      # 头像文件持久化：容器内 /opt/linli-server/uploads ↔ 服务器 ./uploads
+      # 这样容器重建后头像不丢
+      - ./uploads:/opt/linli-server/uploads
     networks:
       - linli-net
     deploy:
