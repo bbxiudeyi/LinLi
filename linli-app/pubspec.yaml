@@ -20,12 +20,14 @@ dependencies:
   # 地图 & 定位（自建 MapLibre 瓦片服务 map.bbtech.top，无需 token）
   maplibre_gl: ^0.26.1
   geolocator: ^13.0.0
+  # 图片选图 + 裁剪（头像用）
+  image_picker: ^1.1.2
+  image_cropper: ^12.2.1
 
   # UI 组件
   fl_chart: ^0.70.2
   cached_network_image: ^3.4.1
   shimmer: ^3.0.0
-  image_picker: ^1.1.2
 
   # 工具
   dio: ^5.8.0+1

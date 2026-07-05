@@ -5,6 +5,12 @@
 	<!-- 定位权限：运动录制必需 -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于记录你的运动轨迹</string>
+	<!-- 相册权限：上传头像必需 -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于选择头像图片</string>
+	<!-- 相机权限：拍照上传头像（image_picker 可选来源） -->
+	<key>NSCameraUsageDescription</key>
+	<string>用于拍照设置头像</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

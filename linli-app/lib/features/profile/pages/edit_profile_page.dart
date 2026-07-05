@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import '../providers/profile_provider.dart';
 
@@ -47,25 +48,49 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     _avatarUrl = p['avatar_url'] as String?;
   }
 
-  /// 选图 + 压缩 + 上传。
-  /// image_picker 的 maxWidth/maxHeight/imageQuality 在选图时即完成压缩，
-  /// 输出的已是 256px、JPEG 80% 的小图（几 KB）。
+  /// 选图 → 裁剪 → 压缩 → 上传。
+  /// ① image_picker 从相册选图
+  /// ② image_cropper 弹出裁剪界面（1:1 方形，适合头像）
+  /// ③ 裁剪输出时压缩到 256px / JPEG 80%
+  /// ④ 上传到后端 + 更新显示
   Future<void> _pickAvatar() async {
     if (_uploadingAvatar) return;
     setState(() => _uploadingAvatar = true);
     try {
+      // ① 选图
       final picker = ImagePicker();
-      final xfile = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 256, // 压缩：最大边 256px
+      final xfile = await picker.pickImage(source: ImageSource.gallery);
+      if (xfile == null) return; // 用户取消
+
+      // ② 裁剪（1:1 方形，输出 256px / JPEG 80%）
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: xfile.path,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        uiSettings: [
+          IOSUiSettings(
+            title: '裁剪头像',
+            aspectRatioLockEnabled: true,
+            aspectRatioPickerButtonHidden: true,
+            resetAspectRatioEnabled: false,
+          ),
+          AndroidUiSettings(
+            toolbarTitle: '裁剪头像',
+            toolbarColor: Colors.black,
+            toolbarWidgetColor: Colors.white,
+            activeControlsWidgetColor: Colors.black,
+            lockAspectRatio: true,
+          ),
+        ],
+        compressFormat: ImageCompressFormat.jpg,
         maxHeight: 256,
-        imageQuality: 80, // JPEG 质量 80%
+        maxWidth: 256,
+        compressQuality: 80,
       );
-      if (xfile == null) {
-        // 用户取消
-        return;
-      }
-      final file = File(xfile.path);
+      if (cropped == null) return; // 用户在裁剪界面取消
+
+      final file = File(cropped.path);
+
+      // ④ 上传 + 刷新
       final ok = await ref.read(profileProvider.notifier).uploadAvatar(file);
       if (!ok) {
         if (mounted) {
@@ -75,7 +100,6 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
         }
         return;
       }
-      // 上传成功：从 provider 读回最新 avatar_url，刷新本地显示
       final newUrl = ref.read(profileProvider).profile?['avatar_url'] as String?;
       if (mounted) {
         setState(() {
