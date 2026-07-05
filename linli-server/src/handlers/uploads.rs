@@ -1,7 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
-use axum::extract::Multipart;
+use axum::extract::{Multipart, State};
 use axum::Json;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -84,4 +84,4 @@ pub async fn upload_avatar(
 
     tracing::info!("用户 {user_id} 上传头像: {url} ({} bytes)", data.len());
     Ok(Json(UploadAvatarResponse { url }))
-})
+}
