@@ -66,10 +66,21 @@ async fn main() -> anyhow::Result<()> {
         // 用户
         .route("/api/v1/users/:id", get(handlers::social::get_user_profile))
         .route("/api/v1/users/me", patch(handlers::social::update_my_profile))
+        .route("/api/v1/users/search", get(handlers::social::search_users))
         .route("/api/v1/users/:id/follow", post(handlers::social::follow_user))
         .route(
             "/api/v1/users/:id/follow",
             delete(handlers::social::unfollow_user),
+        )
+        // 通知
+        .route("/api/v1/notifications", get(handlers::social::list_notifications))
+        .route(
+            "/api/v1/notifications/unread_count",
+            get(handlers::social::unread_count),
+        )
+        .route(
+            "/api/v1/notifications/:id/read",
+            post(handlers::social::mark_notification_read),
         )
         // 头像上传（要登录）
         .route(

@@ -132,6 +132,12 @@ class ActivityDetailPage extends ConsumerWidget {
       'walk': '走路',
     }[type] ?? type;
 
+    // 开始/结束时间（解析 ISO 字符串）
+    final startStr = a['start_time'] as String?;
+    final endStr = a['end_time'] as String?;
+    final startTime = startStr != null ? DateTime.tryParse(startStr) : null;
+    final endTime = endStr != null ? DateTime.tryParse(endStr) : null;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -141,6 +147,16 @@ class ActivityDetailPage extends ConsumerWidget {
           Text(sportLabel,
               style:
                   const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          // 开始 ~ 结束时间
+          if (startTime != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              endTime != null
+                  ? '${_fmtDateTime(startTime)} ~ ${_fmtDateTime(endTime)}'
+                  : _fmtDateTime(startTime),
+              style: TextStyle(color: Colors.grey[600], fontSize: 13),
+            ),
+          ],
           const SizedBox(height: 12),
 
           // 轨迹地图（MapLibre + 自托管 pixelmap 底图）
@@ -149,6 +165,8 @@ class ActivityDetailPage extends ConsumerWidget {
             height: 220,
             interactive: true,
             fitBounds: true,
+            // 轨迹加载中时显示地图 + 提示（不跳布局）
+            loadingHint: detail.points.isEmpty ? '轨迹加载中...' : null,
           ),
           const SizedBox(height: 16),
 
@@ -211,6 +229,14 @@ class ActivityDetailPage extends ConsumerWidget {
     final m = secondsPerKm ~/ 60;
     final s = secondsPerKm % 60;
     return "$m'${s.toString().padLeft(2, '0')}";
+  }
+
+  /// 格式化日期时间：YYYY-MM-DD HH:MM
+  String _fmtDateTime(DateTime dt) {
+    final local = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
   }
 }
 

@@ -41,14 +41,12 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
 
   /// 加载当前用户资料 + 最近活动（本地优先，后台云端刷新）。
   /// 本地优先：秒开 + 离线可用；活动列表读本地（含未同步的）。
+  ///
+  /// 注意：不依赖 authProvider.user——因为 App 启动时 authProvider 异步
+  /// 恢复登录态（要等 /auth/me 网络请求），此时 user 可能还是 null。
+  /// 但本地缓存的 profile 里就有 avatar_url，应立即展示，不等网络。
   Future<void> loadProfile() async {
-    final user = _ref.read(authProvider).user;
-    if (user == null) {
-      state = state.copyWith(loading: false);
-      return;
-    }
-
-    // ① 本地优先：先读本地缓存，立即展示
+    // ① 本地优先：先读本地缓存，立即展示（即使 authProvider 还没恢复）
     try {
       final cachedProfile = await LocalDb.instance.getMyProfile();
       final localActivities = await LocalDb.instance.listActivities(limit: 10);
@@ -71,6 +69,8 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
     }
 
     // ② 后台拉云端刷新（失败用本地兜底，不报错）
+    //    即使 authProvider 还没恢复，ApiClient 的 token 拦截器会从磁盘读 token，
+    //    所以这里直接请求即可；token 无效时 catch 走本地兜底。
     try {
       final profileRes = await ApiClient.instance.dio.get('/auth/me');
       final profile = profileRes.data as Map<String, dynamic>;

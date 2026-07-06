@@ -63,13 +63,14 @@ pub async fn update_my_profile(
              gender = $4,
              birthday = $5,
              weight_kg = $6,
-             password_hash = COALESCE($7, password_hash),
-             token_version = CASE WHEN $8::boolean
+             height_cm = COALESCE($7, height_cm),
+             password_hash = COALESCE($8, password_hash),
+             token_version = CASE WHEN $9::boolean
                                   THEN token_version + 1
                                   ELSE token_version END
-           WHERE id = $9
+           WHERE id = $10
            RETURNING id, email, nickname, avatar_url, bio, gender, birthday,
-                     weight_kg, created_at"#,
+                     weight_kg, height_cm, created_at"#,
     )
     .bind(&req.nickname)
     .bind(&req.avatar_url)
@@ -77,6 +78,7 @@ pub async fn update_my_profile(
     .bind(req.gender.as_deref())
     .bind(req.birthday)
     .bind(req.weight_kg)
+    .bind(req.height_cm)
     .bind(new_pwd_hash)
     .bind(bump_version)
     .bind(user_id)
@@ -229,6 +231,19 @@ pub async fn follow_user(
     .bind(target_id)
     .execute(&state.db)
     .await?;
+
+    // 关注成功后，给被关注者发一条"关注通知"
+    // UNIQUE(user_id, actor_id, type) 保证重复关注不重复发通知
+    let _ = sqlx::query(
+        "INSERT INTO notifications (user_id, actor_id, type)
+         VALUES ($2, $1, 'follow')
+         ON CONFLICT (user_id, actor_id, type) DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(target_id)
+    .execute(&state.db)
+    .await;
+
     Ok(Json(serde_json::json!({ "following": true })))
 }
 
@@ -244,4 +259,90 @@ pub async fn unfollow_user(
         .execute(&state.db)
         .await?;
     Ok(Json(serde_json::json!({ "following": false })))
+}
+
+// ==================== 用户搜索 ====================
+
+/// GET /api/v1/users/search?q=<昵称>&limit=20
+///
+/// 按昵称模糊搜索用户（排除自己），返回公开资料 + 当前用户是否已关注。
+#[derive(Deserialize)]
+pub struct SearchParams {
+    pub q: String,
+    pub limit: Option<i64>,
+}
+
+pub async fn search_users(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Query(params): Query<SearchParams>,
+) -> AppResult<Json<Vec<crate::models::SearchResult>>> {
+    let limit = params.limit.unwrap_or(20).clamp(1, 50);
+    let pattern = format!("%{}%", params.q.trim());
+    let rows: Vec<crate::models::SearchResult> = sqlx::query_as(
+        r#"SELECT u.id, u.nickname, u.avatar_url, u.bio, u.created_at,
+                  EXISTS(SELECT 1 FROM follows
+                         WHERE follower_id = $1 AND following_id = u.id) AS "is_following!:bool"
+           FROM users u
+           WHERE u.nickname ILIKE $2 AND u.id <> $1
+           ORDER BY u.nickname
+           LIMIT $3"#,
+    )
+    .bind(user_id)
+    .bind(&pattern)
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+// ==================== 通知 ====================
+
+/// GET /api/v1/notifications
+///
+/// 列出我的通知（关注通知等），JOIN users 拿到触发者的昵称/头像。
+pub async fn list_notifications(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> AppResult<Json<Vec<crate::models::NotificationItem>>> {
+    let rows: Vec<crate::models::NotificationItem> = sqlx::query_as(
+        r#"SELECT n.id, n.type AS "type", n.read, n.created_at,
+                  u.id AS actor_id, u.nickname AS actor_nickname, u.avatar_url AS actor_avatar_url
+           FROM notifications n
+           JOIN users u ON u.id = n.actor_id
+           WHERE n.user_id = $1
+           ORDER BY n.created_at DESC
+           LIMIT 50"#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+/// GET /api/v1/notifications/unread_count
+pub async fn unread_count(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND read = false")
+            .bind(user_id)
+            .fetch_one(&state.db)
+            .await?;
+    Ok(Json(serde_json::json!({ "count": count })))
+}
+
+/// POST /api/v1/notifications/:id/read
+pub async fn mark_notification_read(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(notif_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    sqlx::query("UPDATE notifications SET read = true WHERE id = $1 AND user_id = $2")
+        .bind(notif_id)
+        .bind(user_id)
+        .execute(&state.db)
+        .await?;
+    Ok(Json(serde_json::json!({ "read": true })))
 }

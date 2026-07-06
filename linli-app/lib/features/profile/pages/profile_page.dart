@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -226,7 +227,7 @@ class _ProfileHeader extends StatelessWidget {
           CircleAvatar(
             radius: 36,
             backgroundImage: profile?['avatar_url'] != null
-                ? NetworkImage(profile!['avatar_url'])
+                ? CachedNetworkImageProvider(profile!['avatar_url'])
                 : null,
             child: profile?['avatar_url'] == null
                 ? const Icon(Icons.person, size: 36)
@@ -358,6 +359,18 @@ class _ActivitiesTabState extends State<_ActivitiesTab> {
                       'walk': '🚶',
                     }[type] ?? '🏃';
                     final synced = (activity['sync_status'] as num?)?.toInt() == 1;
+                    // 开始时间格式化
+                    final startStr = activity['start_time'] as String?;
+                    final startTime =
+                        startStr != null ? DateTime.tryParse(startStr) : null;
+                    String timeStr = '';
+                    if (startTime != null) {
+                      final local = startTime.toLocal();
+                      String two(int n) => n.toString().padLeft(2, '0');
+                      timeStr =
+                          '${local.year}-${two(local.month)}-${two(local.day)} '
+                          '${two(local.hour)}:${two(local.minute)}  ·  ';
+                    }
 
                     return ListTile(
                       leading: Text(sportIcon,
@@ -384,7 +397,7 @@ class _ActivitiesTabState extends State<_ActivitiesTab> {
                           ],
                         ],
                       ),
-                      subtitle: Text(distanceStr),
+                      subtitle: Text('$timeStr$distanceStr'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () async {
                         await context

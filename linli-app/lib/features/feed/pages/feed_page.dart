@@ -1,6 +1,9 @@
+import 'package:badges/badges.dart' as badges;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/network/api_client.dart';
 import '../providers/feed_provider.dart';
 
 class FeedPage extends ConsumerStatefulWidget {
@@ -11,13 +14,24 @@ class FeedPage extends ConsumerStatefulWidget {
 }
 
 class _FeedPageState extends ConsumerState<FeedPage> {
+  int _unreadCount = 0;
+
   @override
   void initState() {
     super.initState();
-    // 首次进入自动加载动态流（之前只在下拉刷新时加载）
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(feedProvider.notifier).loadFeed();
+      _loadUnread();
     });
+  }
+
+  /// 拉取未读通知数（用于 AppBar 角标）。
+  Future<void> _loadUnread() async {
+    try {
+      final res = await ApiClient.instance.dio.get('/notifications/unread_count');
+      final count = (res.data['count'] as num?)?.toInt() ?? 0;
+      if (mounted) setState(() => _unreadCount = count);
+    } catch (_) {}
   }
 
   @override
@@ -25,7 +39,40 @@ class _FeedPageState extends ConsumerState<FeedPage> {
     final feed = ref.watch(feedProvider);
 
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('动态'),
+        actions: [
+          // 好友搜索（左）
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: '搜索好友',
+            onPressed: () => context.push('/search'),
+          ),
+          // 消息通知（右）+ 未读角标
+          IconButton(
+            tooltip: '消息通知',
+            onPressed: () async {
+              await context.push('/notifications');
+              // 从通知页返回后刷新角标（已读后数量应减少）
+              _loadUnread();
+            },
+            icon: badges.Badge(
+              showBadge: _unreadCount > 0,
+              badgeContent: Text(
+                _unreadCount > 99 ? '99+' : '$_unreadCount',
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+              badgeStyle: const badges.BadgeStyle(
+                badgeColor: Colors.black,
+                padding: EdgeInsets.all(4),
+              ),
+              child: const Icon(Icons.notifications_outlined),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
+        top: false, // AppBar 已处理顶部安全区
         child: _buildBody(context, ref, feed),
       ),
     );
@@ -112,9 +159,9 @@ class _ActivityCard extends StatelessWidget {
 
     // 后端返回扁平的 nickname / avatar_url（无嵌套 users 对象）
     final nickname = (activity['nickname'] as String?) ?? '未知用户';
-    // 点赞数：后端返回 kudo_count，本地根据已赞状态即时增减
-    final baseKudos = (activity['kudo_count'] as num?)?.toInt() ?? 0;
-    final kudoCount = baseKudos + (hasKudo ? 1 : 0);
+    // 点赞数：直接用后端的 kudo_count（已含当前用户的赞）。
+    // toggleKudo 成功后 provider 会同步更新这个字段，UI 即时正确。
+    final kudoCount = (activity['kudo_count'] as num?)?.toInt() ?? 0;
 
     return Card(
       child: InkWell(
@@ -136,7 +183,7 @@ class _ActivityCard extends StatelessWidget {
                     CircleAvatar(
                       radius: 18,
                       backgroundImage: (activity['avatar_url'] as String?) != null
-                          ? NetworkImage(activity['avatar_url'] as String)
+                          ? CachedNetworkImageProvider(activity['avatar_url'] as String)
                           : null,
                       child: (activity['avatar_url'] as String?) == null
                           ? const Icon(Icons.person, size: 20)

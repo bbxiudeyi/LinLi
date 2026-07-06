@@ -17,6 +17,7 @@ pub struct User {
     pub gender: Option<String>,
     pub birthday: Option<NaiveDate>,
     pub weight_kg: Option<f64>,
+    pub height_cm: Option<f64>,
     #[serde(skip_serializing)]
     pub token_version: i32,
     pub created_at: DateTime<Utc>,
@@ -55,6 +56,7 @@ pub struct UpdateUserRequest {
     pub gender: Option<String>,
     pub birthday: Option<NaiveDate>,
     pub weight_kg: Option<f64>,
+    pub height_cm: Option<f64>,
     pub password: Option<String>, // 改密码时传入，会同时 token_version+1 让其他设备掉线
 }
 
@@ -79,6 +81,7 @@ pub struct UserProfile {
     pub gender: Option<String>,
     pub birthday: Option<NaiveDate>,
     pub weight_kg: Option<f64>,
+    pub height_cm: Option<f64>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -93,6 +96,30 @@ pub struct PublicUserProfile {
     pub created_at: DateTime<Utc>,
 }
 
+/// 用户搜索结果（公开资料 + 当前用户是否已关注）。
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct SearchResult {
+    pub id: Uuid,
+    pub nickname: String,
+    pub avatar_url: Option<String>,
+    pub bio: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub is_following: bool,
+}
+
+/// 通知项（关注通知等）。
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct NotificationItem {
+    pub id: Uuid,
+    pub r#type: String, // 'follow'（r# 因为 type 是 Rust 关键字）
+    pub read: bool,
+    pub created_at: DateTime<Utc>,
+    // actor 信息（JOIN users 拿到）
+    pub actor_id: Uuid,
+    pub actor_nickname: String,
+    pub actor_avatar_url: Option<String>,
+}
+
 impl From<User> for UserProfile {
     fn from(u: User) -> Self {
         Self {
@@ -104,6 +131,7 @@ impl From<User> for UserProfile {
             gender: u.gender,
             birthday: u.birthday,
             weight_kg: u.weight_kg,
+            height_cm: u.height_cm,
             created_at: u.created_at,
         }
     }

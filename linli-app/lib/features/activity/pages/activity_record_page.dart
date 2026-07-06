@@ -149,56 +149,21 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
   @override
   Widget build(BuildContext context) {
     final sport = widget.tracking.sportType;
-    // 地图固定高度：屏幕高度的 55%，不论底部内容多少都不变。
-    // 这样准备态→录制态切换时，地图框体大小保持不变。
-    final mapHeight = MediaQuery.of(context).size.height * 0.55;
+    // Stack 布局：地图占据整个 body（绝对固定，不受底部内容影响），
+    // 顶部栏 + 数据块 + 按钮浮在地图上方。
+    // 这是运动 App 的标准做法，地图区域在三态切换时绝不会变化。
     return Scaffold(
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            // ===== 顶部栏 =====
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Text(sport.icon, style: const TextStyle(fontSize: 24)),
-                  const SizedBox(width: 8),
-                  Text(sport.label,
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const Spacer(),
-                  if (_isPaused)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.blueGrey.shade100,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text('已暂停',
-                          style: TextStyle(
-                              color: Colors.blueGrey.shade700, fontSize: 12)),
-                    ),
-                  if (_isReady)
-                    TextButton(
-                      onPressed: _starting
-                          ? null
-                          : () => widget.ref
-                              .read(gpsTrackerProvider.notifier)
-                              .reset(),
-                      child: const Text('换一个'),
-                    ),
-                ],
-              ),
-            ),
-            // ===== 地图（固定高度 + 固定 key，三态无缝衔接）=====
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                height: mapHeight,
+            // ===== 地图：铺满整个 body，固定 key 三态共用同一实例 =====
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: ActivityMap(
                   key: const ValueKey('session_map'),
                   points: widget.tracking.gpsPoints,
-                  height: mapHeight,
+                  height: double.infinity, // 铺满 Stack
                   interactive: true,
                   fitBounds: false,
                   alwaysShowMap: true,
@@ -206,13 +171,55 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-            // ===== 底部区：剩余空间，按钮位置跨态保持一致 =====
-            Expanded(
+            // ===== 顶部栏（浮在地图上）=====
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Text(sport.icon, style: const TextStyle(fontSize: 24)),
+                    const SizedBox(width: 8),
+                    Text(sport.label,
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const Spacer(),
+                    if (_isPaused)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('已暂停',
+                            style: TextStyle(
+                                color: Colors.blueGrey.shade700,
+                                fontSize: 12)),
+                      ),
+                    if (_isReady)
+                      TextButton(
+                        onPressed: _starting
+                            ? null
+                            : () => widget.ref
+                                .read(gpsTrackerProvider.notifier)
+                                .reset(),
+                        child: const Text('换一个'),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            // ===== 底部区（浮在地图上）：数据块 + 按钮 =====
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 录制中/暂停：显示数据块（准备态不显示，留白）
+                  // 录制中/暂停：显示数据块（半透明背景，浮在地图上）
                   if (_isActive)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -221,7 +228,9 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
                           _DataBlock(
                             label: '距离',
                             value: widget.tracking.distanceDisplay,
-                            unit: widget.tracking.distanceMeters >= 1000 ? 'km' : 'm',
+                            unit: widget.tracking.distanceMeters >= 1000
+                                ? 'km'
+                                : 'm',
                           ),
                           _DataBlock(
                             label: '用时',
@@ -235,22 +244,21 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
                           ),
                           _DataBlock(
                             label: '爬升',
-                            value: widget.tracking.elevationGain.toStringAsFixed(0),
+                            value:
+                                widget.tracking.elevationGain.toStringAsFixed(0),
                             unit: 'm',
                           ),
                         ],
                       ),
                     ),
-                  const Spacer(),
-                  // 按钮行：开始/暂停/继续 按钮始终在同一位置，
-                  // 录制态时右侧多一个停止按钮。
+                  const SizedBox(height: 16),
+                  // 按钮行：开始/暂停/继续 始终居中，录制态右侧加停止
                   Padding(
                     padding: const EdgeInsets.only(bottom: 32),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // 主按钮：开始 / 暂停 / 继续（位置不变）
                         FloatingActionButton.large(
                           heroTag: 'toggle',
                           backgroundColor: const Color(0xFF000000),
@@ -285,7 +293,6 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
                                   size: 48,
                                 ),
                         ),
-                        // 录制态：右侧加停止按钮
                         if (_isActive) ...[
                           const SizedBox(width: 48),
                           FloatingActionButton.large(
@@ -522,12 +529,22 @@ class _DataBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 白色阴影：数据直接显示在地图上时保证可读性
+    const shadow = Shadow(
+      color: Colors.white70,
+      blurRadius: 4,
+      offset: Offset(1, 1),
+    );
     return Expanded(
       child: Column(
         children: [
           Text(label,
-              style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-          const SizedBox(height: 4),
+              style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  shadows: [shadow])),
+          const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -535,11 +552,17 @@ class _DataBlock extends StatelessWidget {
             children: [
               Text(value,
                   style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold)),
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.black,
+                      shadows: [shadow])),
               if (unit.isNotEmpty)
                 Text(unit,
-                    style:
-                        TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                        shadows: [shadow])),
             ],
           ),
         ],

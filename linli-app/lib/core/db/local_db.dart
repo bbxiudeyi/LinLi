@@ -22,8 +22,9 @@ class LocalDb {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dbPath, 'linli.db'),
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -89,10 +90,19 @@ class LocalDb {
         gender TEXT,
         birthday TEXT,
         weight_kg REAL,
+        height_cm REAL,
         created_at TEXT,
         cached_at TEXT NOT NULL
       )
     ''');
+  }
+
+  /// 数据库升级回调（老用户已装 App 升级时调用）。
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // v2: my_profile 表加 height_cm 列
+      await db.execute('ALTER TABLE my_profile ADD COLUMN height_cm REAL');
+    }
   }
 
   // ==================== 活动 ====================
@@ -257,6 +267,7 @@ class LocalDb {
         'gender': profile['gender'],
         'birthday': profile['birthday'],
         'weight_kg': (profile['weight_kg'] as num?)?.toDouble(),
+        'height_cm': (profile['height_cm'] as num?)?.toDouble(),
         'created_at': profile['created_at'],
         'cached_at': DateTime.now().toUtc().toIso8601String(),
       },
@@ -284,6 +295,7 @@ class LocalDb {
       'gender': r['gender'],
       'birthday': r['birthday'],
       'weight_kg': r['weight_kg'],
+      'height_cm': r['height_cm'],
       'created_at': r['created_at'],
     };
   }

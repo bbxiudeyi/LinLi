@@ -34,7 +34,7 @@ pub async fn register(
         r#"INSERT INTO users (email, password_hash, nickname)
            VALUES ($1, $2, $3)
            RETURNING id, email, password_hash, nickname, avatar_url, bio,
-                     gender, birthday, weight_kg, token_version, created_at, updated_at"#,
+                     gender, birthday, weight_kg, height_cm, token_version, created_at, updated_at"#,
     )
     .bind(&req.email)
     .bind(&password_hash)
@@ -62,7 +62,7 @@ pub async fn login(
 
     let user: Option<User> = sqlx::query_as(
         r#"SELECT id, email, password_hash, nickname, avatar_url, bio,
-                  gender, birthday, weight_kg, token_version, created_at, updated_at
+                  gender, birthday, weight_kg, height_cm, token_version, created_at, updated_at
            FROM users WHERE email = $1"#,
     )
     .bind(&req.email)
@@ -106,7 +106,7 @@ pub async fn me(
 ) -> AppResult<Json<UserProfile>> {
     let user: User = sqlx::query_as(
         r#"SELECT id, email, password_hash, nickname, avatar_url, bio,
-                  gender, birthday, weight_kg, token_version, created_at, updated_at
+                  gender, birthday, weight_kg, height_cm, token_version, created_at, updated_at
            FROM users WHERE id = $1"#,
     )
     .bind(user_id)

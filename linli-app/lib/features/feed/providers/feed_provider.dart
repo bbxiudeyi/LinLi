@@ -54,6 +54,8 @@ class FeedNotifier extends StateNotifier<FeedState> {
   }
 
   /// 切换某活动的点赞状态（调云端 API）。
+  /// 成功后同步更新 kudoMap 和 activities 里的 kudo_count，
+  /// 保证 UI 即时反映正确数字（后端 kudo_count 已含当前用户的赞）。
   Future<void> toggleKudo(String activityId) async {
     final has = state.kudoMap[activityId] ?? false;
     try {
@@ -62,9 +64,22 @@ class FeedNotifier extends StateNotifier<FeedState> {
       } else {
         await ApiClient.instance.dio.post('/activities/$activityId/kudos');
       }
+      // 更新 kudoMap
       final newMap = Map<String, bool>.from(state.kudoMap);
       newMap[activityId] = !has;
-      state = state.copyWith(kudoMap: newMap);
+      // 同步更新 activities 里对应项的 kudo_count（点赞 +1，取消 -1）
+      final newActivities = state.activities.map((a) {
+        if (a['id'] == activityId) {
+          final cur = (a['kudo_count'] as num?)?.toInt() ?? 0;
+          return {...a, 'kudo_count': cur + (!has ? 1 : -1)};
+        }
+        return a;
+      }).toList();
+      state = FeedState(
+        activities: newActivities,
+        kudoMap: newMap,
+        loading: state.loading,
+      );
     } catch (e) {
       debugPrint('切换点赞失败: $e');
       // 网络失败，状态不变

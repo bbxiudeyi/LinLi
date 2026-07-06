@@ -9,10 +9,12 @@ import '../features/profile/pages/profile_page.dart';
 import '../features/profile/pages/edit_profile_page.dart';
 import '../features/profile/pages/user_profile_page.dart';
 import '../features/activity/pages/activity_detail_page.dart';
+import '../features/search/pages/search_page.dart';
+import '../features/notifications/pages/notifications_page.dart';
 import 'main_shell.dart';
 
 /// 需要登录才能访问的路径前缀。
-const _protectedPrefixes = ['/feed', '/record', '/clubs', '/profile', '/activity', '/user'];
+const _protectedPrefixes = ['/feed', '/record', '/clubs', '/profile', '/activity', '/user', '/search', '/notifications'];
 
 final router = GoRouter(
   initialLocation: '/feed',
@@ -92,6 +94,14 @@ final router = GoRouter(
     GoRoute(
       path: '/profile/edit',
       builder: (context, state) => const EditProfilePage(),
+    ),
+    GoRoute(
+      path: '/search',
+      builder: (context, state) => const SearchPage(),
+    ),
+    GoRoute(
+      path: '/notifications',
+      builder: (context, state) => const NotificationsPage(),
     ),
   ],
 );

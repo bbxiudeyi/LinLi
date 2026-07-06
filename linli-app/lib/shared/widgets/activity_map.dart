@@ -16,18 +16,22 @@ class ActivityMap extends StatefulWidget {
   final List<GpsPoint> points;
   final bool interactive;
   final bool fitBounds;
-  final double height;
+  final double? height;
   final bool alwaysShowMap;
   final bool showLocationPuck;
+  /// points 为空时显示的提示文字（如"轨迹加载中..."）。
+  /// 设置后 points 空时仍渲染地图（带居中提示），避免布局跳动。
+  final String? loadingHint;
 
   const ActivityMap({
     super.key,
     required this.points,
     this.interactive = true,
     this.fitBounds = true,
-    this.height = 200,
+    this.height,
     this.alwaysShowMap = false,
     this.showLocationPuck = false,
+    this.loadingHint,
   });
 
   @override
@@ -48,7 +52,10 @@ class _ActivityMapState extends State<ActivityMap> {
     if (!MapConfig.isConfigured) {
       return _Placeholder(text: '地图服务未配置', height: widget.height);
     }
-    if (widget.points.isEmpty && !widget.alwaysShowMap) {
+    // points 为空：若无 loadingHint 则显示占位；有 loadingHint 则继续渲染地图（叠加提示）
+    if (widget.points.isEmpty &&
+        !widget.alwaysShowMap &&
+        widget.loadingHint == null) {
       return _Placeholder(text: '暂无轨迹数据', height: widget.height);
     }
 
@@ -81,13 +88,46 @@ class _ActivityMapState extends State<ActivityMap> {
       onStyleLoadedCallback: _onStyleLoaded,
     );
 
-    return SizedBox(
-      height: widget.height,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: map,
+    // height 为 null/double.infinity 时不约束高度（让父级 Positioned.fill 决定）
+    final constrainHeight =
+        widget.height != null && widget.height != double.infinity;
+    final inner = ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        children: [
+          map,
+          // points 空时居中显示加载提示（地图照常显示，不跳布局）
+          if (widget.points.isEmpty && widget.loadingHint != null)
+            Positioned.fill(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(widget.loadingHint!,
+                          style: TextStyle(
+                              color: Colors.grey[700], fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+    return constrainHeight ? SizedBox(height: widget.height, child: inner) : inner;
   }
 
   Future<void> _onMapCreated(MapLibreMapController controller) async {
@@ -124,7 +164,12 @@ class _ActivityMapState extends State<ActivityMap> {
     }
 
     await _renderTrack();
-    _applyCamera();
+    // 录制模式持续跟随最新点；详情/准备页只 apply 一次
+    if (widget.showLocationPuck && widget.points.isNotEmpty) {
+      _followLatest(widget.points.last);
+    } else {
+      _applyCamera();
+    }
   }
 
   @override
@@ -132,9 +177,12 @@ class _ActivityMapState extends State<ActivityMap> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.points.length != widget.points.length) {
       _renderTrack();
-      // 准备页场景：style 先加载（当时 points 空，相机没 apply），
-      // selectSport 拿到首位置后 points 更新，这里补一次相机跟随。
-      if (!_cameraApplied && widget.points.isNotEmpty) {
+      final pts = widget.points;
+      if (widget.showLocationPuck && pts.isNotEmpty) {
+        // 录制模式：持续跟随最新点（用户移动时地图平滑跟随，不跳变）
+        _followLatest(pts.last);
+      } else if (!_cameraApplied && pts.isNotEmpty) {
+        // 详情/准备页：只 apply 一次相机（适配轨迹或跟随首点）
         _applyCamera();
       }
     }
@@ -176,6 +224,18 @@ class _ActivityMapState extends State<ActivityMap> {
   }
 
   // ==================== 相机视野 ====================
+
+  /// 录制模式：把相机移到最新点（持续跟随，每次来新点都调用）。
+  /// 不设 _cameraApplied，让录制中持续跟随。
+  void _followLatest(GpsPoint p) {
+    final controller = _controller;
+    if (controller == null) return;
+    controller.animateCamera(
+      CameraUpdate.newLatLng(
+        LatLng(p.latLng.latitude, p.latLng.longitude),
+      ),
+    );
+  }
 
   void _applyCamera() {
     if (_cameraApplied) return;
@@ -226,7 +286,7 @@ class _ActivityMapState extends State<ActivityMap> {
 
 class _Placeholder extends StatelessWidget {
   final String text;
-  final double height;
+  final double? height;
   const _Placeholder({required this.text, required this.height});
 
   @override

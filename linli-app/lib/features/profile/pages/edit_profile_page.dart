@@ -24,6 +24,7 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
   late final TextEditingController _nicknameCtrl;
   late final TextEditingController _bioCtrl;
   late final TextEditingController _weightCtrl;
+  late final TextEditingController _heightCtrl;
   String? _gender; // 'male' | 'female' | 'other'
   DateTime? _birthday;
   bool _saving = false;
@@ -42,6 +43,8 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     _bioCtrl = TextEditingController(text: p['bio'] as String? ?? '');
     _weightCtrl = TextEditingController(
         text: p['weight_kg'] != null ? p['weight_kg'].toString() : '');
+    _heightCtrl = TextEditingController(
+        text: p['height_cm'] != null ? p['height_cm'].toString() : '');
     _gender = p['gender'] as String?;
     final b = p['birthday'] as String?;
     if (b != null) _birthday = DateTime.tryParse(b);
@@ -123,6 +126,7 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     _nicknameCtrl.dispose();
     _bioCtrl.dispose();
     _weightCtrl.dispose();
+    _heightCtrl.dispose();
     super.dispose();
   }
 
@@ -140,6 +144,8 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     }
     final w = double.tryParse(_weightCtrl.text.trim());
     if (w != null) fields['weight_kg'] = w;
+    final h = double.tryParse(_heightCtrl.text.trim());
+    if (h != null) fields['height_cm'] = h;
 
     final ok = await ref.read(profileProvider.notifier).updateProfile(fields);
     if (!mounted) return;
@@ -292,6 +298,14 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
               controller: _weightCtrl,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(hintText: '用于热量计算'),
+            ),
+            const SizedBox(height: 16),
+
+            _Label('身高 (cm)'),
+            TextField(
+              controller: _heightCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(hintText: '用于 BMI 计算'),
             ),
             const SizedBox(height: 32),
           ],
