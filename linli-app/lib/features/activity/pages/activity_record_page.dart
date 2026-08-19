@@ -148,7 +148,6 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
 
   @override
   Widget build(BuildContext context) {
-    final sport = widget.tracking.sportType;
     // Stack 布局：地图占据整个 body（绝对固定，不受底部内容影响），
     // 顶部栏 + 数据块 + 按钮浮在地图上方。
     // 这是运动 App 的标准做法，地图区域在三态切换时绝不会变化。
@@ -172,6 +171,7 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
               ),
             ),
             // ===== 顶部栏（浮在地图上）=====
+            // 左上角：返回重选（仅准备态显示）；右上角：暂停标记
             Positioned(
               top: 0,
               left: 0,
@@ -180,10 +180,16 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    Text(sport.icon, style: const TextStyle(fontSize: 24)),
-                    const SizedBox(width: 8),
-                    Text(sport.label,
-                        style: Theme.of(context).textTheme.titleLarge),
+                    if (_isReady)
+                      IconButton(
+                        onPressed: _starting
+                            ? null
+                            : () => widget.ref
+                                .read(gpsTrackerProvider.notifier)
+                                .reset(),
+                        icon: const Icon(Icons.arrow_back),
+                        tooltip: '返回重选运动',
+                      ),
                     const Spacer(),
                     if (_isPaused)
                       Container(
@@ -197,15 +203,6 @@ class _RecordSessionViewState extends State<_RecordSessionView> {
                             style: TextStyle(
                                 color: Colors.blueGrey.shade700,
                                 fontSize: 12)),
-                      ),
-                    if (_isReady)
-                      TextButton(
-                        onPressed: _starting
-                            ? null
-                            : () => widget.ref
-                                .read(gpsTrackerProvider.notifier)
-                                .reset(),
-                        child: const Text('换一个'),
                       ),
                   ],
                 ),
