@@ -27,7 +27,7 @@ pub struct UploadAvatarResponse {
 /// 只是多占一点磁盘（单文件 ≤2MB）。
 pub async fn upload_avatar(
     State(state): State<AppState>,
-    AuthUser(user_id): AuthUser(user_id),
+    AuthUser(user_id): AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<Json<UploadAvatarResponse>> {
     // 取出第一个字段（字段名要求是 file）
