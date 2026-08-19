@@ -8,6 +8,11 @@
 .env.prod
 .env.local
 
+# Android 签名密钥（P0-5：绝不入库）
+**/key.properties
+*.jks
+*.keystore
+
 # 编辑器/IDE
 .idea/
 .vscode/

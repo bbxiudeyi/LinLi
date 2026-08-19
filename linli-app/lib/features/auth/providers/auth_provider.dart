@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/db/local_db.dart';
 import '../../../core/network/api_client.dart';
 import '../../activity/providers/activity_provider.dart';
 
@@ -83,12 +84,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final res = await ApiClient.instance.dio.get('/auth/me');
       final user = RemoteUser.fromJson(res.data as Map<String, dynamic>);
+      // 先切换本地数据归属（P0-1 账号隔离 + 清理僵尸录制），再恢复 UI 状态
+      await LocalDb.instance.setActiveUser(user.id);
       state = AuthState(status: AuthStatus.authenticated, user: user);
       // 登录态恢复成功，触发待同步活动的重试（fire-and-forget）
       _triggerSync();
     } catch (_) {
       // token 失效，清除
       await ApiClient.instance.clearToken();
+      await LocalDb.instance.setActiveUser(null);
       state = state.copyWith(status: AuthStatus.unauthenticated);
     }
   }
@@ -113,6 +117,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final token = res.data['token'] as String;
       final user = RemoteUser.fromJson(res.data['user'] as Map<String, dynamic>);
       await ApiClient.instance.saveToken(token);
+      await LocalDb.instance.setActiveUser(user.id);
       state = AuthState(status: AuthStatus.authenticated, user: user);
       _triggerSync();
     } on DioException catch (e) {
@@ -134,6 +139,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final token = res.data['token'] as String;
       final user = RemoteUser.fromJson(res.data['user'] as Map<String, dynamic>);
       await ApiClient.instance.saveToken(token);
+      await LocalDb.instance.setActiveUser(user.id);
       state = AuthState(status: AuthStatus.authenticated, user: user);
       _triggerSync();
     } on DioException catch (e) {
@@ -145,6 +151,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   /// 退出登录：通知后端撤销 token + 清本地状态。
+  /// 本地数据不删（P0-1：按账号隔离，下次登录同一账号仍可见），
+  /// 但内存列表必须清空，避免登出后还看得到上一账号的活动。
   Future<void> signOut() async {
     try {
       // 通知后端撤销 token（token_version + 1）
@@ -153,6 +161,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // 网络失败不影响登出
     }
     await ApiClient.instance.clearToken();
+    await LocalDb.instance.setActiveUser(null);
+    try {
+      _ref.read(activityListProvider.notifier).clear();
+    } catch (_) {}
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 }

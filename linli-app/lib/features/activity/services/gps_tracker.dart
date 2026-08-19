@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -108,6 +109,9 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
   Timer? _timer;
   StreamSubscription<Position>? _positionSub;
   DateTime? _startTime;
+  /// 计时真值（P0-4）：单调时钟，不受系统时间被改/时区切换影响。
+  /// [_timer] 只负责每秒把 elapsed 刷进 state 供 UI 显示。
+  final Stopwatch _stopwatch = Stopwatch();
   static const _distance = Distance();
 
   // ===== 漂移过滤 & 移动判定阈值（问题2/问题3）=====
@@ -122,9 +126,7 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
   /// 上一个"有效"点（用于距离/速度计算）。与 state.gpsPoints 解耦：
   /// 被精度过滤丢弃的点不更新此字段，避免用差定位算距离。
   GpsPoint? _lastValidPoint;
-  /// 上一个有效点的 wall clock（用于计算时间差判定移动时间）。
-  DateTime? _lastValidTime;
-  /// 移动时间累计（秒）。
+  /// 移动时间累计（秒）。段时长用 GPS 时间戳差计算（P0-4：不依赖墙钟）。
   int _movingSeconds = 0;
 
   GpsTrackerNotifier() : super(const TrackingState());
@@ -209,6 +211,7 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
   void pause() {
     _timer?.cancel();
     _positionSub?.cancel();
+    _stopwatch.stop();
     state = state.copyWith(state: RecordingState.paused);
   }
 
@@ -230,17 +233,33 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
   void stop() {
     _timer?.cancel();
     _positionSub?.cancel();
+    _stopwatch.stop();
     state = state.copyWith(state: RecordingState.stopped);
   }
 
-  /// 放弃本次录制（保存页点"放弃"用）：清空一切回 idle。
-  void discard() {
+  /// 放弃本次录制（保存页点"放弃"用）：
+  /// 事务删除本地 DB 里的活动行 + 轨迹点；**只有删除成功才清空内存**回 idle。
+  /// 删除失败返回 false 且保留当前状态，调用方必须提示"未能丢弃，稍后重试"，
+  /// 不得假装成功（P0-2）。被放弃的活动 lifecycle 停在 recording，
+  /// 永远不会进入待同步队列，不会被上传。
+  Future<bool> discard() async {
+    final activityId = state.localActivityId;
+    if (activityId != null) {
+      try {
+        await LocalDb.instance.deleteActivity(activityId);
+      } catch (e) {
+        debugPrint('放弃活动时删除本地数据失败: $e');
+        return false;
+      }
+    }
     reset();
+    return true;
   }
 
   void _startTimer() {
+    _stopwatch.start();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      state = state.copyWith(durationSeconds: state.durationSeconds + 1);
+      state = state.copyWith(durationSeconds: _stopwatch.elapsed.inSeconds);
     });
   }
 
@@ -270,7 +289,6 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
       accuracy: p.accuracy,
       timestamp: p.timestamp.toUtc(),
     );
-    final now = DateTime.now();
 
     int newDistance = state.distanceMeters;
     double newElevationGain = state.elevationGain;
@@ -278,9 +296,12 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
 
     if (_lastValidPoint != null) {
       final segMeters = _distance(_lastValidPoint!.latLng, newPoint.latLng);
-      final segTimeSec = _lastValidTime != null
-          ? now.difference(_lastValidTime!).inSeconds
-          : 0;
+      // 段时长用 GPS 时间戳差计算（P0-4：不依赖墙钟，系统改时间不影响统计）；
+      // 上限 1 小时兜底 GPS 时钟跳变。
+      final segTimeSec = newPoint.timestamp
+          .difference(_lastValidPoint!.timestamp)
+          .inSeconds
+          .clamp(0, 3600);
 
       // ===== 问题3：距离过滤 =====
       // 相邻距离 < _minMoveMeters 视为静止抖动，不累计距离。
@@ -306,7 +327,6 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
 
     // 更新"上一个有效点"状态
     _lastValidPoint = newPoint;
-    _lastValidTime = now;
     _movingSeconds = newMovingSeconds;
 
     // ===== 离线防丢：把该点实时写入本地 DB =====
@@ -343,7 +363,13 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
   /// 返回 null 表示没有有效数据（点数不足或无开始时间）。
   /// 点数阈值 2 与 retryUnsynced 一致：< 2 个点无法构成轨迹，不保存。
   Future<ActivitySummary?> buildSummary() async {
-    if (state.gpsPoints.length < 2 || _startTime == null) return null;
+    if (state.gpsPoints.length < 2 || _startTime == null) {
+      // 排障关键信息：点数不足几乎都是"没移动/精度过滤丢光"导致
+      debugPrint(
+          'buildSummary 放弃保存：gpsPoints=${state.gpsPoints.length}, '
+          'startTime=${_startTime != null}');
+      return null;
+    }
 
     final endTime = DateTime.now();
     // 平均速度/配速用移动时间（movingTimeSeconds）算，剔除等红灯/休息，
@@ -399,8 +425,10 @@ class GpsTrackerNotifier extends StateNotifier<TrackingState> {
     _positionSub?.cancel();
     _startTime = null;
     _lastValidPoint = null;
-    _lastValidTime = null;
     _movingSeconds = 0;
+    _stopwatch
+      ..stop()
+      ..reset();
     state = const TrackingState();
   }
 

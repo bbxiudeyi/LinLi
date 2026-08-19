@@ -139,29 +139,36 @@ class _ActivityMapState extends State<ActivityMap> {
     final controller = _controller;
     if (controller == null) return;
 
-    // 一次性建好轨迹 source + line layer
-    if (!_trackLayerAdded) {
-      try {
-        await controller.addGeoJsonSource(
-          _trackSourceId,
-          _pointsToGeoJson(widget.points),
-        );
-        await controller.addLineLayer(
-          _trackLayerId,
-          _trackSourceId,
-          const LineLayerProperties(
-            lineColor: '#FF6B35', // 与旧版一致的橙色
-            lineWidth: 5.0,
-            lineCap: 'round',
-            lineJoin: 'round',
-          ),
-        );
-        _trackLayerAdded = true;
-      } catch (e) {
-        // source/layer 可能已存在，忽略重复添加错误
-        debugPrint('addGeoJsonSource/addLineLayer 失败: $e');
-      }
+    // source 初始化必须用"合法的空 GeoJSON"（FeatureCollection + 空数组）。
+    // 不能直接用当前 points 生成 LineString：录制刚开始 points 是空的，
+    // 空坐标的 LineString 是非法 GeoJSON，会触发 parseError 且 try 块中断，
+    // 导致 line layer 永远建不起来、后续所有画线全部连锁失败。
+    try {
+      await controller.addGeoJsonSource(_trackSourceId, _emptyGeoJson());
+    } catch (e) {
+      // style 重载时 source 可能已存在，忽略并继续
+      debugPrint('addGeoJsonSource 初始化失败（可能已存在）: $e');
     }
+    try {
+      // 注意：maplibre_gl 0.26 的参数顺序是 (sourceId, layerId, ...)，
+      // 与 mapbox_gl 的 (layerId, sourceId) 相反——之前传反导致
+      // "Source with id track-layer not found"，轨迹图层从未创建成功。
+      await controller.addLineLayer(
+        _trackSourceId,
+        _trackLayerId,
+        const LineLayerProperties(
+          lineColor: '#000000', // 黑色（与黑白主题一致）
+          lineWidth: 6.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+          lineOpacity: 0.85,
+        ),
+      );
+    } catch (e) {
+      // layer 已存在时忽略
+      debugPrint('addLineLayer 失败（可能已存在）: $e');
+    }
+    _trackLayerAdded = true;
 
     await _renderTrack();
     // 录制模式持续跟随最新点；详情/准备页只 apply 一次
@@ -194,17 +201,24 @@ class _ActivityMapState extends State<ActivityMap> {
     final controller = _controller;
     if (controller == null || !_trackLayerAdded) return;
     final pts = widget.points;
-    if (pts.isEmpty) return;
     try {
+      // 不足 2 个点时写合法的空集合清掉旧线，绝不生成空坐标 LineString
       await controller.setGeoJsonSource(
         _trackSourceId,
-        _pointsToGeoJson(pts),
+        pts.length < 2 ? _emptyGeoJson() : _pointsToGeoJson(pts),
       );
     } catch (e) {
       debugPrint('setGeoJsonSource 失败: $e');
     }
   }
 
+  /// 合法的空 GeoJSON（FeatureCollection 允许零个 feature）。
+  Map<String, dynamic> _emptyGeoJson() => const {
+        'type': 'FeatureCollection',
+        'features': [],
+      };
+
+  /// 轨迹 LineString GeoJSON（调用方保证 [pts] 至少 2 个点）。
   Map<String, dynamic> _pointsToGeoJson(List<GpsPoint> pts) {
     return {
       'type': 'FeatureCollection',

@@ -56,13 +56,16 @@ pub async fn update_my_profile(
     };
 
     let user: crate::models::UserProfile = sqlx::query_as(
+        // P1-3：所有可选字段统一 COALESCE——请求里缺字段 = 不修改，
+        // 只传 avatar_url 更新头像时不再把 bio/gender 等清空。
+        // （显式清空字段的语义留待 JSON Patch 改造，当前客户端不发 null。）
         r#"UPDATE users SET
              nickname = COALESCE($1, nickname),
              avatar_url = COALESCE($2, avatar_url),
-             bio = $3,
-             gender = $4,
-             birthday = $5,
-             weight_kg = $6,
+             bio = COALESCE($3, bio),
+             gender = COALESCE($4, gender),
+             birthday = COALESCE($5, birthday),
+             weight_kg = COALESCE($6, weight_kg),
              height_cm = COALESCE($7, height_cm),
              password_hash = COALESCE($8, password_hash),
              token_version = CASE WHEN $9::boolean

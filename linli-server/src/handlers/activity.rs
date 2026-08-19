@@ -113,6 +113,10 @@ pub async fn create_activity(
     const MAX_TRACK_POINTS: usize = 50_000; // 单次最多 5 万点（约马拉松级）
     const MAX_DISTANCE_M: i32 = 1_000_000; // 1000 km
     const MAX_DURATION_S: i32 = 24 * 3600; // 24 小时
+    const MAX_TITLE_CHARS: usize = 100;
+    const MAX_DESC_CHARS: usize = 2_000;
+    const MAX_ELE_ABS: f64 = 10_000.0; // 海拔绝对值上限（米）
+    const MAX_SPEED_MPS: f64 = 130.0; // 单点速度上限（~468 km/h，覆盖骑行+漂移）
     if req.track.len() < 2 {
         return Err(AppError::BadRequest("track 至少 2 个点".into()));
     }
@@ -132,6 +136,49 @@ pub async fn create_activity(
         return Err(AppError::BadRequest(format!(
             "duration_s 必须在 0..{MAX_DURATION_S} 之间"
         )));
+    }
+    // 文本长度限制（P1-5：防超长文本撑爆数据库/页面）
+    if let Some(ref t) = req.title {
+        if t.chars().count() > MAX_TITLE_CHARS {
+            return Err(AppError::BadRequest(format!(
+                "title 长度超过 {MAX_TITLE_CHARS} 字符"
+            )));
+        }
+    }
+    if let Some(ref d) = req.description {
+        if d.chars().count() > MAX_DESC_CHARS {
+            return Err(AppError::BadRequest(format!(
+                "description 长度超过 {MAX_DESC_CHARS} 字符"
+            )));
+        }
+    }
+    // 轨迹点合法性（P1-5）：有限数、经纬度范围、海拔/速度合理区间。
+    // NaN/Infinity 会被 json 正常反序列化，必须显式拦截。
+    for (i, p) in req.track.iter().enumerate() {
+        if !p.lat.is_finite()
+            || !p.lng.is_finite()
+            || !(-90.0..=90.0).contains(&p.lat)
+            || !(-180.0..=180.0).contains(&p.lng)
+        {
+            return Err(AppError::BadRequest(format!(
+                "track[{i}] 经纬度非法（lat={}, lng={}）",
+                p.lat, p.lng
+            )));
+        }
+        if let Some(ele) = p.ele {
+            if !ele.is_finite() || ele.abs() > MAX_ELE_ABS {
+                return Err(AppError::BadRequest(format!(
+                    "track[{i}] 海拔非法: {ele}"
+                )));
+            }
+        }
+        if let Some(s) = p.speed {
+            if !s.is_finite() || s < 0.0 || s > MAX_SPEED_MPS {
+                return Err(AppError::BadRequest(format!(
+                    "track[{i}] 速度非法: {s}"
+                )));
+            }
+        }
     }
 
     // ★ 幂等：若客户端传入 id，检查是否已存在
@@ -196,7 +243,8 @@ pub async fn create_activity(
     .bind(&linestring_wkt)
     .bind(&req.title)
     .bind(&req.description)
-    .bind(req.is_private.unwrap_or(false))
+    // P0-3：缺省一律私密，公开必须由客户端显式声明
+    .bind(req.is_private.unwrap_or(true))
     .execute(&mut *tx)
     .await?;
 

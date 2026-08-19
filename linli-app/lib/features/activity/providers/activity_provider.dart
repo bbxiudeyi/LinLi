@@ -83,16 +83,29 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
     }
   }
 
+  /// 清空内存列表（登出时调用；本地数据保留，按账号隔离）。
+  void clear() {
+    state = const ActivityListState();
+  }
+
   /// 上传运动活动到云端（带客户端生成的 id，幂等）。
   /// 数据已在录制时写入本地 DB，这里只负责上传 + 更新同步状态。
+  ///
+  /// [isPrivate] 是用户在保存页选择的可见范围（P0-3：默认私密）。
+  /// 上传前先把活动标记为 saved：只有用户明确保存过的活动才会上传，
+  /// 与"放弃"互斥（P0-2）；上传中途崩溃也会走重试而不是被当僵尸清理。
   /// 返回活动 id（成功）；失败返回 null 但**数据不丢**（本地保留 sync_status=0）。
-  Future<String?> saveActivity(ActivitySummary summary) async {
+  Future<String?> saveActivity(ActivitySummary summary,
+      {bool isPrivate = true}) async {
     final activityId = summary.localActivityId;
     if (activityId == null) {
       debugPrint('saveActivity: 缺少 localActivityId');
       return null;
     }
     try {
+      // 先落"已保存"状态 + 可见范围，再上传（P0-2/P0-3）
+      await LocalDb.instance
+          .markSaved(activityId, isPrivate: isPrivate);
       // 多维轨迹点：{lat, lng, ele, speed, time}（与后端 TrackPointInput 对齐）
       final track = summary.gpsPoints.asMap().entries.map((e) {
         final p = e.value;
@@ -120,6 +133,7 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
         'calories': summary.calories,
         'start_time': summary.startTime.toUtc().toIso8601String(),
         'end_time': summary.endTime.toUtc().toIso8601String(),
+        'is_private': isPrivate,
         'track': track,
       });
       // 写本地活动行的 title（录制时本地行无 title，这里补上）
@@ -141,19 +155,24 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
     }
   }
 
-  /// 删除活动：先删云端（失败不阻塞），再删本地，再刷新内存列表。
-  /// 后端已有 DELETE /activities/:id；云端失败时本地仍删（用户意图明确）。
-  Future<void> deleteActivity(String id) async {
-    // ① 云端删除（失败不阻塞本地删除）
-    try {
-      await ApiClient.instance.dio.delete('/activities/$id');
-    } catch (e) {
-      debugPrint('云端删除活动失败（继续删本地）: $e');
+  /// 删除活动（P1-2：云端删除失败时不再物理删本地，防"删除复活"）。
+  /// - 已同步过的活动：必须先删掉云端，成功才删本地；失败返回 false，
+  ///   由 UI 提示重试（tombstone/自动重试留待后续 outbox 改造）。
+  /// - 从未同步过的活动：直接删本地即可（云端本来就没有）。
+  Future<bool> deleteActivity(String id) async {
+    final local = await LocalDb.instance.getActivity(id);
+    final wasSynced = (local?['sync_status'] as int? ?? 0) == 1;
+    if (wasSynced) {
+      try {
+        await ApiClient.instance.dio.delete('/activities/$id');
+      } catch (e) {
+        debugPrint('云端删除活动失败（保留本地，稍后重试）: $e');
+        return false;
+      }
     }
-    // ② 本地删除（活动行 + 轨迹点，事务保证原子）
     await LocalDb.instance.deleteActivity(id);
-    // ③ 刷新内存中的活动列表
     await loadMyActivities();
+    return true;
   }
 
   /// 扫描所有未同步的活动，逐个上传重试。
@@ -198,6 +217,9 @@ class ActivityListNotifier extends StateNotifier<ActivityListState> {
           'calories': row['calories'],
           'start_time': row['start_time'],
           'end_time': row['end_time'],
+          // SQLite 存的是 INTEGER 0/1，后端要 bool——必须转换，
+          // 之前直接传 int 会被 serde 拒绝导致补传永远失败
+          'is_private': (row['is_private'] as int? ?? 1) == 1,
           'track': track,
         });
         await LocalDb.instance.markSynced(activityId);

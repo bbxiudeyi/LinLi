@@ -68,11 +68,19 @@ class ActivityDetailPage extends ConsumerWidget {
     );
     if (confirmed != true) return;
 
-    await ref.read(activityListProvider.notifier).deleteActivity(activityId);
+    final deleted =
+        await ref.read(activityListProvider.notifier).deleteActivity(activityId);
+    if (!context.mounted) return;
+    if (!deleted) {
+      // 云端删除失败：本地数据保留（防"删除复活"），提示稍后重试
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('删除失败，请检查网络后重试')),
+      );
+      return;
+    }
     // 删除后刷新活跃日历（Profile 页的活动列表靠 onChanged 回调自动刷新）
     ref.read(activityStatsProvider.notifier).load();
 
-    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('活动已删除')),
     );

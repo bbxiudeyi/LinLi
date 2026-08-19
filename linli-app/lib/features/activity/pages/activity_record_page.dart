@@ -332,6 +332,7 @@ class _SaveView extends StatefulWidget {
 
 class _SaveViewState extends State<_SaveView> {
   bool _saving = false;
+  bool _isPrivate = true; // P0-3：默认私密，用户显式选择才公开
   late final TextEditingController _titleController;
 
   @override
@@ -375,7 +376,7 @@ class _SaveViewState extends State<_SaveView> {
 
     final id = await widget.ref
         .read(activityListProvider.notifier)
-        .saveActivity(named);
+        .saveActivity(named, isPrivate: _isPrivate);
 
     widget.ref.read(gpsTrackerProvider.notifier).reset();
 
@@ -388,8 +389,22 @@ class _SaveViewState extends State<_SaveView> {
     context.go('/profile');
   }
 
-  void _discard() {
-    widget.ref.read(gpsTrackerProvider.notifier).discard();
+  /// 放弃本次录制（P0-2）：只有本地数据真正删掉才算成功。
+  /// 删除失败时不清内存、不离开保存页，明确提示稍后重试。
+  Future<void> _discard() async {
+    final ok =
+        await widget.ref.read(gpsTrackerProvider.notifier).discard();
+    if (!mounted) return;
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已放弃本次录制')),
+      );
+      // tracker 已 reset 回 idle，录制页自动回到运动选择视图（安全页）
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('未能丢弃，请稍后重试')),
+      );
+    }
   }
 
   @override
@@ -476,6 +491,19 @@ class _SaveViewState extends State<_SaveView> {
                   unit: 'km/h',
                 ),
               ],
+            ),
+            const SizedBox(height: 24),
+            // 可见范围（P0-3）：默认私密；公开会向已登录用户暴露完整精确轨迹
+            SwitchListTile(
+              value: !_isPrivate,
+              onChanged: _saving
+                  ? null
+                  : (v) => setState(() => _isPrivate = !v),
+              title: const Text('公开本次活动'),
+              subtitle: Text(
+                _isPrivate ? '仅自己可见（推荐）' : '关注你的人可在动态流看到轨迹',
+              ),
+              contentPadding: EdgeInsets.zero,
             ),
             const SizedBox(height: 32),
             FilledButton.icon(
