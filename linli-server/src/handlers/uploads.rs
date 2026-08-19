@@ -15,14 +15,19 @@ pub struct UploadAvatarResponse {
 
 /// POST /api/v1/uploads/avatar
 ///
-/// 接收 multipart 文件（字段名 `file`），存为 `{upload_dir}/avatars/{user_id}.jpg`，
+/// 接收 multipart 文件（字段名 `file`），存为 `{upload_dir}/avatars/{user_id}_{ts}.jpg`，
 /// 返回可通过 PUBLIC_BASE_URL 访问的完整 URL。
 ///
 /// 校验：必须是图片（content-type image/*）、大小 < 2MB。
-/// 同一用户多次上传会覆盖旧头像（文件名固定）。
+///
+/// 文件名带上传时间戳（修复头像缓存 bug）：客户端头像按 URL 缓存
+/// （CachedNetworkImage），之前固定 `{user_id}.jpg` 覆盖写入、URL 不变，
+/// 导致换头像后 Feed/我的页等一直显示旧图。现在每次上传 URL 都不同，
+/// 所有端天然刷新。旧文件保留不删——客户端缓存的旧 URL 还能正常出图，
+/// 只是多占一点磁盘（单文件 ≤2MB）。
 pub async fn upload_avatar(
     State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
+    AuthUser(user_id): AuthUser(user_id),
     mut multipart: Multipart,
 ) -> AppResult<Json<UploadAvatarResponse>> {
     // 取出第一个字段（字段名要求是 file）
@@ -59,15 +64,16 @@ pub async fn upload_avatar(
         return Err(AppError::BadRequest("文件过大，最大 2MB".into()));
     }
 
-    // 构造存储路径：{upload_dir}/avatars/{user_id}.jpg
+    // 构造存储路径：{upload_dir}/avatars/{user_id}_{ts}.jpg
     let mut dir = PathBuf::from(&state.config.upload_dir);
     dir.push("avatars");
     fs::create_dir_all(&dir)
         .await
         .map_err(|e| AppError::Internal(format!("创建目录失败: {e}")))?;
 
-    // 文件名用 user_id（覆盖旧头像，不堆积）
-    let filename = format!("{user_id}.jpg");
+    // 文件名带毫秒时间戳：每次上传生成新 URL，客户端按 URL 缓存即可自动刷新
+    let ts = chrono::Utc::now().timestamp_millis();
+    let filename = format!("{user_id}_{ts}.jpg");
     let file_path = dir.join(&filename);
 
     // 写入磁盘
