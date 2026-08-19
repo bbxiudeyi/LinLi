@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/db/local_db.dart';
 import '../../../core/network/api_client.dart';
-import '../../auth/providers/auth_provider.dart';
 
 class ProfileState {
   final Map<String, dynamic>? profile;
@@ -36,8 +35,7 @@ class ProfileState {
 }
 
 class ProfileNotifier extends StateNotifier<ProfileState> {
-  final Ref _ref;
-  ProfileNotifier(this._ref) : super(const ProfileState());
+  ProfileNotifier() : super(const ProfileState());
 
   /// 加载当前用户资料 + 最近活动（本地优先，后台云端刷新）。
   /// 本地优先：秒开 + 离线可用；活动列表读本地（含未同步的）。
@@ -139,5 +137,5 @@ class ProfileNotifier extends StateNotifier<ProfileState> {
 
 final profileProvider =
     StateNotifierProvider<ProfileNotifier, ProfileState>(
-  (ref) => ProfileNotifier(ref),
+  (ref) => ProfileNotifier(),
 );

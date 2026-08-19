@@ -252,25 +252,26 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
             const SizedBox(height: 16),
 
             _Label('性别'),
-            Row(
-              children: [
-                Expanded(
-                  child: RadioListTile<String>(
-                    title: const Text('男'),
-                    value: 'male',
-                    groupValue: _gender,
-                    onChanged: (v) => setState(() => _gender = v),
+            // Flutter 3.32+：用 RadioGroup 祖先统一管理选中值（替代逐个传 groupValue）
+            RadioGroup<String>(
+              groupValue: _gender,
+              onChanged: (v) => setState(() => _gender = v),
+              child: Row(
+                children: const [
+                  Expanded(
+                    child: RadioListTile<String>(
+                      title: Text('男'),
+                      value: 'male',
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: RadioListTile<String>(
-                    title: const Text('女'),
-                    value: 'female',
-                    groupValue: _gender,
-                    onChanged: (v) => setState(() => _gender = v),
+                  Expanded(
+                    child: RadioListTile<String>(
+                      title: Text('女'),
+                      value: 'female',
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 8),
 

@@ -2,9 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- 定位权限：运动录制必需 -->
+	<!-- 定位权限：运动录制必需（含锁屏/后台继续录制） -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>用于记录你的运动轨迹</string>
+	<string>林立需要在运动录制时获取你的位置，用于记录轨迹、距离和配速；锁屏或切到后台时也会继续记录，直到你停止录制</string>
+	<!-- P0-4：iOS 后台定位模式（录制中锁屏继续记录） -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<!-- 相册权限：上传头像必需 -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于选择头像图片</string>

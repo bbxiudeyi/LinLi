@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+
 import 'package:geolocator/geolocator.dart';
 
 /// 基于 geolocator 的定位服务封装。
@@ -46,14 +48,34 @@ class LocationService {
   ///
   /// - [distanceFilterMeters]：移动超过该距离才回调，省电。0 = 尽可能频繁。
   /// - [intervalMs]：Android 上两次定位的最小间隔。
+  ///
+  /// P0-4：Android 上开启前台服务通知（常驻"录制中"通知 + wake lock），
+  /// 锁屏/切后台时系统不再冻结定位；iOS 依赖 Info.plist 声明的
+  /// `UIBackgroundModes: location` 后台模式。所需权限见 AndroidManifest。
   static Stream<Position> getPositionStream({
     int distanceFilterMeters = 3,
     int intervalMs = 2000,
   }) {
-    final settings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: distanceFilterMeters,
-    );
+    final LocationSettings settings;
+    if (Platform.isAndroid) {
+      settings = AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: distanceFilterMeters,
+        intervalDuration: Duration(milliseconds: intervalMs),
+        foregroundNotificationConfig: ForegroundNotificationConfig(
+          notificationTitle: '林立运动录制中',
+          notificationText: '正在记录你的运动轨迹，返回 App 查看实时数据',
+          enableWakeLock: true,
+          notificationChannelName: '运动录制',
+          setOngoing: true,
+        ),
+      );
+    } else {
+      settings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: distanceFilterMeters,
+      );
+    }
     return Geolocator.getPositionStream(locationSettings: settings);
   }
 }
